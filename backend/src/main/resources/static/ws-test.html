@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Poker WebSocket Test</title>
+</head>
+<body>
+<h3>Poker WebSocket Test</h3>
+<div>
+    <input id="playerIdInput" type="text" placeholder="playerId (비우면 관전자)">
+    <button id="connectBtn">연결</button>
+    <button id="disconnectBtn" disabled>연결 종료</button>
+</div>
+<div style="margin-top:8px;">
+    <select id="actionSelect">
+        <option value="CHECK">CHECK</option>
+        <option value="CALL">CALL</option>
+        <option value="BET">BET</option>
+        <option value="RAISE">RAISE</option>
+        <option value="FOLD">FOLD</option>
+        <option value="ALL_IN">ALL_IN</option>
+    </select>
+    <input id="amountInput" type="number" placeholder="amount" value="0">
+    <button id="sendBtn" disabled>액션 전송</button>
+</div>
+<pre id="log" style="border:1px solid #ccc; padding:8px; height:400px; overflow-y:auto;"></pre>
+
+<script>
+    let socket = null;
+    const log = (line) => {
+        const el = document.getElementById('log');
+        el.textContent += line + '\n';
+        el.scrollTop = el.scrollHeight;
+    };
+
+    document.getElementById('connectBtn').onclick = () => {
+        const playerId = document.getElementById('playerIdInput').value.trim();
+        const url = 'ws://' + location.host + '/ws' + (playerId ? ('?playerId=' + encodeURIComponent(playerId)) : '');
+        socket = new WebSocket(url);
+
+        socket.onopen = () => {
+            log('[연결됨] ' + url);
+            document.getElementById('connectBtn').disabled = true;
+            document.getElementById('disconnectBtn').disabled = false;
+            document.getElementById('sendBtn').disabled = false;
+        };
+        socket.onmessage = (event) => {
+            const parsed = JSON.parse(event.data);
+            if (parsed.type === 'STATE') {
+                log('[STATE] ' + JSON.stringify(parsed.state));
+            } else if (parsed.type === 'ERROR') {
+                log('[ERROR] ' + parsed.message);
+            } else {
+                log('[수신] ' + event.data);
+            }
+        };
+        socket.onclose = () => {
+            log('[연결 종료]');
+            document.getElementById('connectBtn').disabled = false;
+            document.getElementById('disconnectBtn').disabled = true;
+            document.getElementById('sendBtn').disabled = true;
+        };
+        socket.onerror = (event) => log('[에러] ' + JSON.stringify(event));
+    };
+
+    document.getElementById('disconnectBtn').onclick = () => socket.close();
+
+    document.getElementById('sendBtn').onclick = () => {
+        const action = document.getElementById('actionSelect').value;
+        const amount = parseInt(document.getElementById('amountInput').value || '0', 10);
+        const message = { type: 'ACTION', action: action, amount: amount };
+        socket.send(JSON.stringify(message));
+        log('[송신] ' + JSON.stringify(message));
+    };
+</script>
+</body>
+</html>
