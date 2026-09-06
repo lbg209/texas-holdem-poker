@@ -15,8 +15,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Supplier;
 
 // Room의 상태를 받아 한 핸드의 진행(블라인드→딜→베팅→쇼다운)을 조율한다.
+// Room/BettingRound 내부 컬렉션이 스레드 세이프하지 않으므로, 이 인스턴스에 대한 모든 읽기/쓰기는
+// synchronized 메서드 또는 withLock()을 거쳐야 한다 (7단계: 방 단위 동시성/직렬화).
 public class GameEngine {
 
     private final Room room;
@@ -26,7 +29,17 @@ public class GameEngine {
         this.room = room;
     }
 
-    public void startHand() {
+    public synchronized void addPlayer(Player player) {
+        room.addPlayer(player);
+    }
+
+    // Room/BettingRound 상태를 읽기만 하는 외부 코드(REST 상태 조회, WS 브로드캐스트 등)가
+    // 진행 중인 쓰기와 겹치지 않도록 같은 락을 태워서 실행한다.
+    public synchronized <T> T withLock(Supplier<T> action) {
+        return action.get();
+    }
+
+    public synchronized void startHand() {
         if (room.getPlayers().size() < Room.MIN_PLAYERS) {
             throw new GameStateException("최소 " + Room.MIN_PLAYERS + "명이 필요합니다.");
         }
@@ -88,7 +101,7 @@ public class GameEngine {
         return ordered;
     }
 
-    public void applyAction(String playerId, PlayerAction action, int amount) {
+    public synchronized void applyAction(String playerId, PlayerAction action, int amount) {
         Player actor = room.findPlayer(playerId);
         currentBettingRound.applyAction(actor, action, amount);
 
