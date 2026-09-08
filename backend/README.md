@@ -2,7 +2,7 @@
 
 텍사스 홀덤 포커를 서버 권위(server-authoritative) 방식으로 진행하는 게임 서버. 카드 셔플/딜, 족보 판정, 베팅 라운드 진행, 사이드팟 계산, 쇼다운까지 모든 게임 규칙을 서버가 판단하고, 클라이언트는 REST/WebSocket으로 상태를 조회·조작만 한다.
 
-현재는 **단일 고정 테이블 MVP**(로비/멀티룸/로그인 없음)이며, 프론트엔드는 아직 구현되지 않았다. 이 문서는 백엔드에서 지금까지 구현된 내용만 기준으로 작성한다.
+현재는 **단일 고정 테이블 MVP**(로비/멀티룸/로그인 없음)이다. 프론트엔드(`../frontend`)는 별도 React 클라이언트로 구현돼 있으며 자세한 내용은 [frontend/README.md](../frontend/README.md) 참고. 이 문서는 백엔드에서 지금까지 구현된 내용만 기준으로 작성한다.
 
 ## 기술 스택 및 개발 환경
 
@@ -51,14 +51,15 @@ com.lbg0146.backend
 
 ### 3. 플레이어/방/게임 진행 (`player`, `room`, `game`)
 
-- **`Player`**: `commitChips(amount)`가 칩 이동의 유일한 진입점 — 보유 칩보다 많이 요청하면 가진 만큼만 차감하고 자동으로 `ALL_IN` 전환. 스트리트별 베팅액(`currentRoundBet`, 라운드마다 리셋)과 핸드 전체 누적 기여액(`totalHandContribution`, 사이드팟 계산용)을 분리해서 관리한다.
-- **`Room`**: 단일 테이블의 상태(좌석/커뮤니티 카드/팟/덱/페이즈/버튼 위치)만 담고, 진행 로직은 갖지 않는다.
+- **`Player`**: `commitChips(amount)`가 칩 이동의 유일한 진입점 — 보유 칩보다 많이 요청하면 가진 만큼만 차감하고 자동으로 `ALL_IN` 전환. 스트리트별 베팅액(`currentRoundBet`, 라운드마다 리셋)과 핸드 전체 누적 기여액(`totalHandContribution`, 사이드팟 계산용)을 분리해서 관리한다. 이번 스트리트의 마지막 액션(`lastAction`, 라운드 전환 시 초기화)과 핸드 시작 시점 칩(`chipsAtHandStart`, 종료 후 손익 계산 기준)도 함께 추적한다.
+- **`Room`**: 단일 테이블의 상태(좌석/커뮤니티 카드/팟/덱/페이즈/버튼 위치)를 담는다. 전원 폴드로 핸드가 조기 종료됐는지(`wonByFold`)와 가장 최근 쇼다운 결과(`lastShowdownResult`, 다음 핸드 시작 전까지 유지)도 여기서 들고 있는데, 둘 다 진행 로직 자체는 갖지 않고 `GameEngine`이 기록만 위임하는 상태 홀더다.
 - **`BettingRound`**: 한 스트리트의 베팅 진행을 담당하는 상태 기계. `Deque<PendingActor>`로 액션 순서를 관리하며, **short all-in에 따른 레이즈 재오픈 규칙**을 정확히 구현한 것이 이 프로젝트의 핵심 기술 포인트다:
   - 정상 레이즈(최소 레이즈 폭 이상) → 이미 액션한 전원을 레이즈 권한과 함께 재소환(`reopenFully`)
   - 최소 레이즈 폭에 못 미치는 올인(short all-in) → `currentBet`만 올리고 `minimumRaise`는 갱신하지 않으며, 이미 액션한 플레이어는 콜/폴드만 다시 허용(`reopenCallFoldOnly`) — 레이즈 권한은 열리지 않음
   - 액션 검증을 큐에서 꺼내기 **전에** 수행하도록 설계해, 잘못된 액션 시도가 실제 턴 순서를 깨뜨리지 않게 함
+  - BET/RAISE 금액은 `Room.BET_UNIT`(100) 단위로만 허용하고, 보유 칩 전부를 정확히 거는 경우(사실상 올인)만 예외로 허용한다
 - **`PotCalculator`**: `totalHandContribution` 기준으로 기여 금액 구간을 나눠 메인팟/사이드팟을 계산한다. 예) A·D가 1700, B가 500(폴드), C가 700(올인)을 기여하면 → 700 구간까지는 A/B/C/D 전원 참여한 메인팟(2,600, 단 B는 폴드라 수령 자격 없음), 700 초과분은 A/D만 자격이 있는 사이드팟(2,000)으로 분리된다.
-- **`GameEngine`**: 블라인드 포스팅 → 홀카드 딜 → 베팅 라운드 → (필요 시) 커뮤니티 카드 오픈 → 쇼다운까지 한 핸드 전체를 조율한다. 헤즈업(2인)은 버튼이 곧 스몰블라인드이자 첫 액션자라는 예외 규칙을 별도 처리하고, 베팅 가능한 플레이어가 1명 이하로 남으면(나머지 전원 올인) 새 베팅 라운드 없이 커뮤니티 카드만 순서대로 오픈하는 올인 런아웃도 지원한다.
+- **`GameEngine`**: 블라인드 포스팅 → 홀카드 딜 → 베팅 라운드 → (필요 시) 커뮤니티 카드 오픈 → 쇼다운까지 한 핸드 전체를 조율한다. 헤즈업(2인)은 버튼이 곧 스몰블라인드이자 첫 액션자라는 예외 규칙을 별도 처리하고, 베팅 가능한 플레이어가 1명 이하로 남으면(나머지 전원 올인) 새 베팅 라운드 없이 커뮤니티 카드만 순서대로 오픈하는 올인 런아웃도 지원한다. 칩이 있는 플레이어가 2명 미만이면 새 핸드 시작을 거부하고, 스플릿팟의 잔돈(나눠떨어지지 않는 1칩 단위)은 좌석 등록 순서가 아니라 **버튼 왼쪽에서 가장 가까운 승자부터** 배분한다(실제 포커의 odd chip rule).
 
 ### 4. REST API (`room.controller`)
 
@@ -68,7 +69,7 @@ REST는 "매 순간 진행형 상태가 아닌, 요청-응답으로 충분한 �
 |---|---|---|
 | GET | `/api/room` | 방 상태 조회. `playerId` 쿼리 파라미터로 본인 시점(자기 홀카드만 공개) 조회, 생략 시 관전자 시점 |
 | POST | `/api/room/players` | 방 참가. 요청 바디 `{"nickname": "..."}`, 서버가 UUID `playerId`를 발급해 응답 |
-| POST | `/api/room/hands` | 새 핸드 시작 |
+| POST | `/api/room/hands` | 새 핸드 시작. `playerId` 쿼리 파라미터를 주면 응답도 `GET /api/room`과 동일하게 그 사람 시점으로 개인화된다(안 주면 관전자 시점) |
 
 응답 DTO(`RoomStateResponse`)는 `Card`/`Pot` 같은 도메인 객체를 직접 노출하지 않고 `CardView`/`PotView`/`PlayerView`로 감싼다(아래 "주요 설계 결정" 참고). 예외는 `@RestControllerAdvice`(`PokerExceptionHandler`)가 도메인 예외를 HTTP 상태 코드로 변환한다.
 
@@ -103,6 +104,19 @@ STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록
 - 상태를 **읽기만** 하는 외부 코드(REST 상태 조회, WebSocket 브로드캐스트, 연결 시 검증)도 `GameEngine.withLock(Supplier<T>)`을 거치도록 통일해, 진행 중인 쓰기와 겹쳐 읽는 일이 없게 함
 - 락은 `GameEngine` 인스턴스 단위라서, 실제 "누구 차례인지"는 `BettingRound`의 액션 큐가 이미 보장하고 있음 — 락의 역할은 순서 강제가 아니라 동시 접근으로 인한 자료구조 손상 방지
 
+### 9. 쇼다운 결과 노출
+
+실제 쇼다운(카드 비교)까지 간 경우, `GameEngine.resolveShowdown()`이 계산한 결과(`ShowdownResult`)를 `Room.lastShowdownResult`에 저장해뒀다가 `RoomStateResponse.showdownHands`로 노출한다. 폴드로 핸드가 끝난 경우(`wonByFold=true`)는 실제로 카드를 비교한 적이 없으므로 이 필드가 비어 있다.
+
+```json
+"showdownHands": [
+  { "playerId": "...", "handRank": "TWO_PAIR", "bestFive": [ ...CardView... ], "isWinner": true },
+  { "playerId": "...", "handRank": "ONE_PAIR", "bestFive": [ ...CardView... ], "isWinner": false }
+]
+```
+
+`handRank`는 `HandEvaluator`가 판정한 9단계 enum 그대로 내려주고, 로열플러시 같은 표시상의 세분화나 한글 라벨링은 프론트엔드 책임으로 남겨뒀다(백엔드는 게임 규칙만, 표현은 클라이언트 책임이라는 원칙).
+
 ## 주요 설계 결정
 
 - **기능별 패키지 구조**: controller/service/repository 같은 역할별 계층 대신 `card`/`hand`/`player`/`room`/`game`처럼 기능 단위로 나눴다. 도메인 로직(`card`~`game`)은 Spring을 참조하지 않아 순수 JUnit으로 검증할 수 있고, `room.controller`/`websocket`만 프레임워크 계층을 안다.
@@ -110,6 +124,8 @@ STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록
 - **`playerId`는 REST 계층의 임시 식별자**: 로그인/인증이 없는 지금 단계에서 서버가 발급하는 UUID일 뿐이고, 도메인 로직(`Room`/`GameEngine`)은 이 값이 어떻게 발급됐는지 모른다. 나중에 실제 인증이 들어와도 발급 방식만 바꾸면 되도록 설계했다.
 - **최소한의 예외 계층**: 아래 "예외 처리" 참고.
 - **동시성은 별도 실행자(Executor)나 메시지 큐 없이 단일 락으로 처리**: 지금은 방이 하나뿐인 MVP라 `ReentrantLock`의 타임아웃/공정성 옵션이나 액터 모델 같은 복잡한 구조가 필요 없다고 판단했다. 락이 `GameEngine` 인스턴스 단위이므로, 향후 방이 여러 개로 늘어나도(방마다 별도 `GameEngine` 인스턴스) 이 설계를 바꿀 필요가 없다.
+- **REST 응답 개인화를 모든 진입점에 일관되게 적용**: 처음엔 `POST /api/room/hands`가 `playerId` 없이 관전자 시점으로만 응답해서, 그 즉시 이어지는 WebSocket 브로드캐스트(개인화됨)와 경쟁하며 순간적으로 본인 홀카드가 안 보이는 버그가 있었다. `GET /api/room`과 동일하게 `playerId` 쿼리 파라미터를 받아 개인화하는 것으로 통일해 해결했다 — REST 엔드포인트가 여러 개여도 "누가 요청했는지에 따라 응답이 달라지는" 규칙은 하나로 유지한다.
+- **폴드 조기 종료 시 베팅 라운드 상태를 명시적으로 정리**: 전원 폴드로 핸드가 끝나면 `currentBettingRound`를 `null`로 비운다. 그대로 두면 이미 끝난 라운드의 `currentActorId`/`currentBet`이 응답에 남아, 아직 액션 안 한 플레이어 화면에 "내 차례"인 것처럼 잘못 보이는 문제가 있었다.
 
 ## 예외 처리 구조
 
@@ -134,7 +150,7 @@ WebSocket 계층은 연결을 끊지 않고, 문제를 일으킨 세션에만 `{
 
 ## 테스트 현황
 
-JUnit 5 기준 총 **55개** 테스트, 전부 통과.
+JUnit 5 기준 총 **62개** 테스트, 전부 통과.
 
 | 대상 | 파일 | 개수 |
 |---|---|---|
@@ -142,11 +158,11 @@ JUnit 5 기준 총 **55개** 테스트, 전부 통과.
 | 족보 판정 | `HandEvaluatorTest` | 15 |
 | 플레이어 | `PlayerTest` | 4 |
 | 방 | `RoomTest` | 3 |
-| 베팅 라운드 (short all-in 포함) | `BettingRoundTest` | 7 |
+| 베팅 라운드 (short all-in, 100단위 검증 포함) | `BettingRoundTest` | 7 |
 | 사이드팟 계산 | `PotCalculatorTest` | 2 |
-| 핸드 오케스트레이션 | `GameEngineTest` | 6 |
+| 핸드 오케스트레이션 (odd chip rule, zero-chip 방지 포함) | `GameEngineTest` | 9 |
 | 동시성 | `GameEngineConcurrencyTest` | 3 |
-| REST API | `RoomControllerTest` | 6 |
+| REST API (쇼다운 노출, 폴드 종료 상태 정리 포함) | `RoomControllerTest` | 10 |
 | WebSocket 프로토콜 | `GameWebSocketHandlerTest` | 4 |
 | Spring 컨텍스트 로딩 | `BackendApplicationTests` | 1 |
 
@@ -154,8 +170,9 @@ JUnit 5 기준 총 **55개** 테스트, 전부 통과.
 
 ## 아직 구현하지 않은 것 (의도적으로 미룸)
 
-- **프론트엔드**: 전혀 구현되지 않았다. `src/main/resources/static/ws-test.html`은 WebSocket 프로토콜을 수동으로 확인하기 위한 개발용 테스트 페이지일 뿐, 실제 UI가 아니다.
 - **DB 연동**: MySQL/JPA 의존성은 `build.gradle`에 주석 처리만 되어 있다. 모든 상태는 서버 메모리에만 존재하며, 서버를 재시작하면 사라진다. 핸드 히스토리 저장이 실제로 필요해지는 시점에 붙일 예정.
-- **쇼다운 승자/족보 명시 메시지**: 쇼다운 결과(칩 이동)는 `RoomStateResponse`의 칩 개수 변화로 간접적으로만 드러나고, "누가 어떤 족보로 이겼는지"를 명시하는 별도 메시지는 아직 없다.
-- **재접속(reconnect) 처리**: 연결이 끊기면 세션이 그냥 해제될 뿐, 재접속 시 상태 복구 로직은 없다.
+- **재접속(reconnect) 시 상태 복구**: 연결이 끊기면 세션이 그냥 해제될 뿐, 서버가 별도로 기억해두는 건 없다(프론트엔드가 재연결 시 새 WebSocket 연결로 최신 상태를 다시 받는 방식으로 대응).
+- **턴 타임아웃**: 시간 제한이 없어서, 한 명이 응답하지 않으면(연결 끊김 포함) 그 핸드는 다른 사람이 액션하기 전까지 무한정 멈춘다. 자동 폴드 같은 처리는 아직 없다.
+- **ready 시스템**: `POST /api/room/hands`는 방에 있는 아무나 호출해도 즉시 전원이 새 핸드에 강제로 참여한다 — "모두 준비되면 시작" 같은 합의 절차는 없다.
 - **로비/멀티룸/roomCode/인증**: 지금은 서버 전체에 고정된 단일 `Room` 하나뿐이다. 여러 방을 동시에 운영하는 기능, 로그인/인증은 전부 이후 단계다.
+- **칩/블라인드 커스터마이징**: 시작 칩(30,000)과 블라인드(100/200)는 `Room`에 고정된 상수다. 방 생성 시 값을 정하는 기능은 멀티룸 도입 후 다룰 예정.
