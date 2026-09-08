@@ -18,6 +18,11 @@ public class Player {
     private int currentRoundBet;
     // 이번 핸드 전체(프리플랍~리버)에서 낸 누적 금액. 핸드가 끝날 때까지 유지되며 사이드팟 계산에 쓰인다.
     private int totalHandContribution;
+    // 이번 스트리트에서 마지막으로 취한 액션. currentRoundBet과 함께 새 스트리트 시작 시 초기화된다.
+    private PlayerAction lastAction;
+    // 이번 핸드가 시작되기 직전(블라인드 걷기 전)의 칩 보유량. 핸드 종료 후 손익(chips - chipsAtHandStart)을
+    // 계산하는 기준점이 된다.
+    private int chipsAtHandStart;
 
     public Player(String id, String nickname, int chips) {
         this.id = id;
@@ -45,14 +50,21 @@ public class Player {
         chips += amount;
     }
 
+    public void recordAction(PlayerAction action) {
+        lastAction = action;
+    }
+
     public void resetForNewRound() {
         currentRoundBet = 0;
+        lastAction = null;
     }
 
     public void resetForNewHand() {
         status = PlayerStatus.ACTIVE;
         currentRoundBet = 0;
         totalHandContribution = 0;
+        lastAction = null;
+        chipsAtHandStart = chips;
         holeCards.clear();
     }
 
@@ -86,5 +98,13 @@ public class Player {
 
     public int getTotalHandContribution() {
         return totalHandContribution;
+    }
+
+    public PlayerAction getLastAction() {
+        return lastAction;
+    }
+
+    public int getChipsAtHandStart() {
+        return chipsAtHandStart;
     }
 }

@@ -113,8 +113,10 @@ class GameEngineConcurrencyTest {
     @Test
     void 상태를_반복적으로_읽는_동안_핸드를_반복_시작해도_예외가_발생하지_않는다() throws InterruptedException {
         Room room = new Room();
-        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS));
-        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        // 매 반복마다 블라인드만 걷고 정산은 없어 칩이 계속 줄어드므로, 500번을 버틸 만큼 넉넉하게 준다
+        // (칩이 0이 되면 GameEngine.startHand()가 의도적으로 시작을 거부하므로, 그 이전에 소진되면 안 된다).
+        room.addPlayer(new Player("a", "A", 10_000_000));
+        room.addPlayer(new Player("b", "B", 10_000_000));
         GameEngine engine = new GameEngine(room);
 
         AtomicBoolean running = new AtomicBoolean(true);

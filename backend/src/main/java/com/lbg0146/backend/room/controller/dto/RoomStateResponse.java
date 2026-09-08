@@ -12,6 +12,7 @@ public record RoomStateResponse(
         int dealerButtonPosition,
         Integer currentBet,
         Integer minimumRaise,
-        String currentActorId
+        String currentActorId,
+        List<ShowdownHandView> showdownHands
 ) {
 }

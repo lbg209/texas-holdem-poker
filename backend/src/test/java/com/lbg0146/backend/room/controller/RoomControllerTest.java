@@ -1,9 +1,13 @@
 package com.lbg0146.backend.room.controller;
 
+import com.lbg0146.backend.game.GameEngine;
+import com.lbg0146.backend.player.PlayerAction;
+import com.lbg0146.backend.room.Room;
 import com.lbg0146.backend.room.controller.dto.JoinPlayerRequest;
 import com.lbg0146.backend.room.controller.dto.JoinPlayerResponse;
 import com.lbg0146.backend.room.controller.dto.PlayerView;
 import com.lbg0146.backend.room.controller.dto.RoomStateResponse;
+import com.lbg0146.backend.room.controller.dto.ShowdownHandView;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -19,7 +23,9 @@ import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -34,6 +40,8 @@ class RoomControllerTest {
     private MockMvc mockMvc;
     @Autowired
     private ObjectMapper objectMapper;
+    @Autowired
+    private GameEngine gameEngine;
 
     private String join(String nickname) throws Exception {
         MvcResult result = mockMvc.perform(post("/api/room/players")
@@ -123,5 +131,69 @@ class RoomControllerTest {
 
         assertEquals(2, findPlayer(asAlice, aliceId).holeCards().size());
         assertEquals(0, findPlayer(asAlice, bobId).holeCards().size());
+    }
+
+    @Test
+    void 베팅_중에도_현재_팟과_누적_기여금이_응답에_바로_반영된다() throws Exception {
+        String aliceId = join("Alice");
+        String bobId = join("Bob");
+
+        // 헤즈업: 버튼=Alice(SB), Bob(BB), 프리플랍 첫 액션=Alice
+        // 게임 액션은 REST가 아니라 WebSocket으로만 처리되므로, GameEngine을 직접 호출해서 액션을 적용한다.
+        mockMvc.perform(post("/api/room/hands")).andExpect(status().isOk());
+        gameEngine.applyAction(aliceId, PlayerAction.CALL, 0);
+
+        RoomStateResponse afterAliceCalls = readRoomState(get("/api/room"));
+        // 아직 쇼다운(핸드 종료) 전이지만, Alice가 콜해서 둘 다 BIG_BLIND씩 낸 상태 — 응답에 바로 반영돼야 한다.
+        assertEquals(1, afterAliceCalls.pots().size());
+        assertEquals(Room.BIG_BLIND * 2, afterAliceCalls.pots().get(0).amount());
+        assertEquals(Room.BIG_BLIND, findPlayer(afterAliceCalls, aliceId).totalHandContribution());
+        assertEquals(Room.BIG_BLIND, findPlayer(afterAliceCalls, bobId).totalHandContribution());
+        assertEquals(PlayerAction.CALL, findPlayer(afterAliceCalls, aliceId).lastAction());
+        assertNull(findPlayer(afterAliceCalls, bobId).lastAction(), "아직 액션하지 않은 플레이어의 lastAction은 null이다");
+    }
+
+    @Test
+    void 폴드로_핸드가_끝나면_상대_턴처럼_보이지_않고_승자_카드도_공개되지_않는다() throws Exception {
+        String aliceId = join("Alice");
+        String bobId = join("Bob");
+
+        // 헤즈업: 버튼=Alice(SB), Bob(BB), 프리플랍 첫 액션=Alice. Alice가 폴드하면 Bob이 액션 없이 즉시 승리한다.
+        mockMvc.perform(post("/api/room/hands")).andExpect(status().isOk());
+        gameEngine.applyAction(aliceId, PlayerAction.FOLD, 0);
+
+        RoomStateResponse asBob = readRoomState(get("/api/room").param("playerId", bobId));
+        assertNull(asBob.currentActorId(), "핸드가 끝났으므로 아무도 액션할 차례가 아니다");
+        assertNull(asBob.currentBet());
+        assertNull(asBob.minimumRaise());
+        assertEquals(2, findPlayer(asBob, bobId).holeCards().size(), "본인 카드는 그대로 보인다");
+
+        RoomStateResponse asAlice = readRoomState(get("/api/room").param("playerId", aliceId));
+        assertEquals(0, findPlayer(asAlice, bobId).holeCards().size(), "폴드로 이긴 것이라 상대 카드가 공개되면 안 된다");
+        assertNull(asAlice.showdownHands(), "폴드로 끝난 핸드는 쇼다운 족보 정보가 없어야 한다");
+    }
+
+    @Test
+    void 리버까지_체크로_진행하면_쇼다운_족보와_승자가_응답에_담긴다() throws Exception {
+        String aliceId = join("Alice");
+        String bobId = join("Bob");
+
+        // 헤즈업: 버튼=Alice(SB), Bob(BB). 프리플랍은 Alice 콜 -> Bob 체크, 이후 스트리트는 Bob(비버튼)이 먼저 체크한다.
+        mockMvc.perform(post("/api/room/hands")).andExpect(status().isOk());
+        gameEngine.applyAction(aliceId, PlayerAction.CALL, 0);
+        gameEngine.applyAction(bobId, PlayerAction.CHECK, 0);
+        for (int street = 0; street < 3; street++) {
+            gameEngine.applyAction(bobId, PlayerAction.CHECK, 0);
+            gameEngine.applyAction(aliceId, PlayerAction.CHECK, 0);
+        }
+
+        RoomStateResponse state = readRoomState(get("/api/room"));
+        assertEquals(5, state.communityCards().size());
+        assertNull(state.currentActorId());
+        assertNotNull(state.showdownHands(), "쇼다운까지 갔으므로 족보 정보가 있어야 한다");
+        assertEquals(2, state.showdownHands().size());
+        assertTrue(state.showdownHands().stream().anyMatch(ShowdownHandView::isWinner), "승자가 최소 한 명은 있어야 한다");
+        assertEquals(2, findPlayer(state, aliceId).holeCards().size(), "실제 쇼다운이라 양쪽 다 카드가 공개된다");
+        assertEquals(2, findPlayer(state, bobId).holeCards().size());
     }
 }

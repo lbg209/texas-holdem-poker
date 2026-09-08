@@ -12,6 +12,7 @@ import com.lbg0146.backend.room.Pot;
 import com.lbg0146.backend.room.Room;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -43,10 +44,16 @@ public class GameEngine {
         if (room.getPlayers().size() < Room.MIN_PLAYERS) {
             throw new GameStateException("최소 " + Room.MIN_PLAYERS + "명이 필요합니다.");
         }
+        long playersWithChips = room.getPlayers().stream().filter(p -> p.getChips() > 0).count();
+        if (playersWithChips < Room.MIN_PLAYERS) {
+            throw new GameStateException("칩이 있는 플레이어가 " + Room.MIN_PLAYERS + "명 미만이라 시작할 수 없습니다.");
+        }
 
         room.getPlayers().forEach(Player::resetForNewHand);
         room.getCommunityCards().clear();
         room.setPots(new ArrayList<>());
+        room.setWonByFold(false);
+        room.setLastShowdownResult(null);
         room.resetDeck();
         room.getDeck().shuffle();
         room.moveButtonToNextSeat();
@@ -80,6 +87,14 @@ public class GameEngine {
         List<Player> players = room.getPlayers();
         int index = (room.getDealerButtonPosition() + offset) % players.size();
         return players.get(index);
+    }
+
+    // 버튼 왼쪽(다음 좌석)부터 시계방향으로 몇 번째 자리인지. 버튼 본인이 가장 마지막(맨 뒤) 순위가 된다.
+    private int distanceFromButton(Player player) {
+        List<Player> seats = room.getPlayers();
+        int seatIndex = seats.indexOf(player);
+        int button = room.getDealerButtonPosition();
+        return (seatIndex - button - 1 + seats.size()) % seats.size();
     }
 
     private void startNewBettingRound(int startOffset, int currentBet, int minimumRaise) {
@@ -128,6 +143,11 @@ public class GameEngine {
         int totalPot = room.getPots().stream().mapToInt(Pot::amount).sum();
         winner.addChips(totalPot);
         room.setPhase(Phase.SHOWDOWN);
+        room.setWonByFold(true);
+        // 베팅 라운드가 도중에 조기 종료된 것이라 큐에 다음 액션자가 남아있을 수 있다.
+        // 그대로 두면 조회 응답에 이미 끝난 핸드의 currentActorId/currentBet이 남아,
+        // 그 사람 화면에 "아직 내 차례"인 것처럼 액션 버튼이 계속 보이게 된다.
+        currentBettingRound = null;
     }
 
     private void advancePhase() {
@@ -144,7 +164,7 @@ public class GameEngine {
         room.getPlayers().forEach(Player::resetForNewRound);
 
         if (next == Phase.SHOWDOWN) {
-            resolveShowdown();
+            room.setLastShowdownResult(resolveShowdown());
             return;
         }
 
@@ -191,11 +211,13 @@ public class GameEngine {
                     .max(EvaluatedHand::compareTo)
                     .orElseThrow();
 
+            // 정확히 나눠떨어지지 않는 잔여 칩(odd chip)은 버튼 왼쪽에서 가장 가까운 승자부터
+            // 시계방향으로 1개씩 배분한다(실제 포커의 "odd chip rule").
             List<Player> winners = eligible.stream()
                     .filter(p -> handsByPlayerId.get(p.getId()).compareTo(best) == 0)
+                    .sorted(Comparator.comparingInt(this::distanceFromButton))
                     .toList();
 
-            // 정확히 나눠떨어지지 않는 잔여 칩은 좌석 순서상 앞쪽 승자부터 1개씩 배분한다.
             int share = pot.amount() / winners.size();
             int remainder = pot.amount() % winners.size();
             for (int i = 0; i < winners.size(); i++) {
@@ -204,7 +226,7 @@ public class GameEngine {
 
             potResults.add(new ShowdownResult.PotResult(pot, winners, best, share));
         }
-        return new ShowdownResult(potResults);
+        return new ShowdownResult(potResults, handsByPlayerId);
     }
 
     public Room getRoom() {

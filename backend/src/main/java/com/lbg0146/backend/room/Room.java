@@ -3,6 +3,7 @@ package com.lbg0146.backend.room;
 import com.lbg0146.backend.card.Card;
 import com.lbg0146.backend.card.Deck;
 import com.lbg0146.backend.exception.GameStateException;
+import com.lbg0146.backend.game.ShowdownResult;
 import com.lbg0146.backend.player.Player;
 
 import java.util.ArrayList;
@@ -25,6 +26,11 @@ public class Room {
     private Deck deck = new Deck();
     private Phase phase;
     private int dealerButtonPosition = -1;
+    // 전원 폴드로 핸드가 조기 종료됐는지 여부. 이 경우 실제 쇼다운(카드 비교)이 없었으므로
+    // 승자의 홀카드를 공개하지 않는다 — RoomStateMapper의 쇼다운 공개 규칙에서 참조한다.
+    private boolean wonByFold;
+    // 가장 최근 쇼다운 결과(족보/승자). 다음 핸드가 시작되기 전까지 유지되며, 그 사이 조회 응답에 노출된다.
+    private ShowdownResult lastShowdownResult;
 
     public void addPlayer(Player player) {
         if (players.size() >= MAX_PLAYERS) {
@@ -82,5 +88,21 @@ public class Room {
 
     public int getDealerButtonPosition() {
         return dealerButtonPosition;
+    }
+
+    public boolean isWonByFold() {
+        return wonByFold;
+    }
+
+    public void setWonByFold(boolean wonByFold) {
+        this.wonByFold = wonByFold;
+    }
+
+    public ShowdownResult getLastShowdownResult() {
+        return lastShowdownResult;
+    }
+
+    public void setLastShowdownResult(ShowdownResult lastShowdownResult) {
+        this.lastShowdownResult = lastShowdownResult;
     }
 }

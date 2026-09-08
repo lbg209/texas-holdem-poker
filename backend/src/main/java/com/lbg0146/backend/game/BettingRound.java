@@ -76,6 +76,7 @@ public class BettingRound {
         }
 
         pendingActors.pollFirst();
+        actor.recordAction(action);
 
         switch (action) {
             case FOLD -> {
