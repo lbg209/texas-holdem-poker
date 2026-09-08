@@ -60,7 +60,8 @@ public class Player {
     }
 
     public void resetForNewHand() {
-        status = PlayerStatus.ACTIVE;
+        // 칩이 없으면 이번 핸드부터 파산 상태다 — ACTIVE로 되돌리지 않는다.
+        status = chips > 0 ? PlayerStatus.ACTIVE : PlayerStatus.BUSTED;
         currentRoundBet = 0;
         totalHandContribution = 0;
         lastAction = null;

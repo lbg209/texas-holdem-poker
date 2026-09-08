@@ -33,6 +33,9 @@ interface PlayerSeatProps {
 // 액션 줄: FOLD/ALL-IN은 상태 기준(스트리트가 바뀌어도 유지), CHECK/CALL/BET/RAISE는
 // 이번 스트리트의 lastAction 기준(스트리트 전환 시 서버에서 null로 리셋됨)으로 판단한다.
 function getActionLine(player: PlayerView): string | null {
+  if (player.status === 'BUSTED') {
+    return 'BUSTED';
+  }
   if (player.status === 'FOLDED') {
     return 'FOLD';
   }
@@ -79,25 +82,31 @@ export function PlayerSeat({
   const faceUp = player.holeCards.length > 0;
   const actionLine = getActionLine(player);
   const isSpecialHand = showdownHand ? isSpecialHandRank(showdownHand.handRank) : false;
+  const isBusted = player.status === 'BUSTED';
 
-  // 딜링 중이면(dealtPlaceholderCount가 주어짐) 실제 홀카드 데이터는 무시하고 그 개수만큼
-  // 뒷면 카드만 보여준다. 그 외엔 평소대로(하이라이트는 "이긴 조합"만 — 승자의 bestFive에
-  // 실제로 포함된 카드만 강조).
-  const cards =
-    dealtPlaceholderCount !== undefined ? (
-      <div className="flex gap-1">
-        {Array.from({ length: dealtPlaceholderCount }).map((_, i) => (
-          <Card key={i} face="down" />
-        ))}
-      </div>
-    ) : (
-      showCards && (
+  // 파산한 좌석은 이번 핸드에 아예 참여하지 않으므로 카드를 아예 그리지 않는다 — 홀카드가
+  // 항상 비어 있어(백엔드가 애초에 안 나눠줌) HoleCard의 "아직 안 왔으면 뒷면 표시" 기본 동작을
+  // 그대로 두면, 딜링 애니메이션이 끝난 뒤에도 뒷면 카드 두 장이 계속 남아 마치 참여 중인
+  // 것처럼 보이는 문제가 있었다.
+  const cards = isBusted
+    ? null
+    : // 딜링 중이면(dealtPlaceholderCount가 주어짐) 실제 홀카드 데이터는 무시하고 그 개수만큼
+      // 뒷면 카드만 보여준다. 그 외엔 평소대로(하이라이트는 "이긴 조합"만 — 승자의 bestFive에
+      // 실제로 포함된 카드만 강조).
+      dealtPlaceholderCount !== undefined ? (
         <div className="flex gap-1">
-          <HoleCard card={hole0} faceUp={faceUp} highlighted={!!(hole0 && containsCard(winnerCards, hole0))} />
-          <HoleCard card={hole1} faceUp={faceUp} highlighted={!!(hole1 && containsCard(winnerCards, hole1))} />
+          {Array.from({ length: dealtPlaceholderCount }).map((_, i) => (
+            <Card key={i} face="down" />
+          ))}
         </div>
-      )
-    );
+      ) : (
+        showCards && (
+          <div className="flex gap-1">
+            <HoleCard card={hole0} faceUp={faceUp} highlighted={!!(hole0 && containsCard(winnerCards, hole0))} />
+            <HoleCard card={hole1} faceUp={faceUp} highlighted={!!(hole1 && containsCard(winnerCards, hole1))} />
+          </div>
+        )
+      );
 
   // 핸드가 끝난 뒤(쇼다운 또는 폴드 종료)에만 이번 핸드의 손익을 +/-로 보여준다.
   const showNetChange = handEnded && player.netChipChange !== 0;
@@ -131,12 +140,16 @@ export function PlayerSeat({
         <div className="relative">
           <div className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2">{cards}</div>
           <div
-            className={`flex min-w-28 flex-col items-center rounded px-2 py-1 text-xs shadow-md sm:text-sm ${
-              isWinner
-                ? 'border-2 border-yellow-400 bg-gradient-to-b from-yellow-900/60 to-slate-900 shadow-[0_0_12px_rgba(250,204,21,0.6)]'
-                : isCurrentActor
-                  ? 'border-2 border-emerald-400 bg-gradient-to-b from-slate-700 to-slate-900 shadow-emerald-400/40'
-                  : 'border border-slate-600 bg-gradient-to-b from-slate-700/90 to-slate-900/90'
+            className={`relative flex min-w-28 flex-col items-center rounded px-2 py-1 text-xs shadow-md sm:text-sm ${
+              player.status === 'BUSTED'
+                ? // 파산: 폴드(단순 반투명)와 다르게, 회색조 + 붉은 빗금 균열 무늬 + 점선 테두리로
+                  // "깨진" 느낌을 낸다 — 더는 이번 핸드에 존재하지 않는 좌석임을 한눈에 구분되게.
+                  'grayscale border-2 border-dashed border-red-900/60 bg-slate-950/90 bg-[repeating-linear-gradient(135deg,rgba(127,29,29,0.35)_0px,rgba(127,29,29,0.35)_2px,transparent_2px,transparent_10px)] opacity-70'
+                : isWinner
+                  ? 'border-2 border-yellow-400 bg-gradient-to-b from-yellow-900/60 to-slate-900 shadow-[0_0_12px_rgba(250,204,21,0.6)]'
+                  : isCurrentActor
+                    ? 'border-2 border-emerald-400 bg-gradient-to-b from-slate-700 to-slate-900 shadow-emerald-400/40'
+                    : 'border border-slate-600 bg-gradient-to-b from-slate-700/90 to-slate-900/90'
             } ${player.status === 'FOLDED' ? 'opacity-50' : ''}`}
           >
             <span className={`font-medium ${isMe ? 'text-emerald-400' : 'text-slate-100'}`}>
@@ -146,7 +159,11 @@ export function PlayerSeat({
                 <span className="ml-1 rounded bg-slate-200 px-1 text-[10px] text-slate-900">{tablePosition}</span>
               )}
             </span>
-            {actionLine && <span className="text-amber-300">{actionLine}</span>}
+            {actionLine && (
+              <span className={player.status === 'BUSTED' ? 'font-bold text-red-500' : 'text-amber-300'}>
+                {actionLine}
+              </span>
+            )}
             {showdownHand && (
               <span
                 className={

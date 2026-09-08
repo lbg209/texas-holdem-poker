@@ -3,7 +3,7 @@
 
 export type Phase = 'PREFLOP' | 'FLOP' | 'TURN' | 'RIVER' | 'SHOWDOWN';
 
-export type PlayerStatus = 'ACTIVE' | 'FOLDED' | 'ALL_IN';
+export type PlayerStatus = 'ACTIVE' | 'FOLDED' | 'ALL_IN' | 'BUSTED';
 
 export type PlayerActionType = 'CHECK' | 'CALL' | 'BET' | 'RAISE' | 'FOLD' | 'ALL_IN';
 

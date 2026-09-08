@@ -58,8 +58,11 @@ public class GameEngine {
         room.getDeck().shuffle();
         room.moveButtonToNextSeat();
 
-        // 헤즈업(2인)은 버튼 자리가 곧 스몰블라인드이고, 프리플랍에서 버튼이 먼저 액션한다.
-        boolean headsUp = room.getPlayers().size() == 2;
+        // 헤즈업(실제로 이번 핸드에 참여하는, 즉 파산하지 않은 인원이 2명)은 버튼 자리가 곧
+        // 스몰블라인드이고, 프리플랍에서 버튼이 먼저 액션한다. 좌석에 앉은 총원이 아니라 파산하지
+        // 않은 인원 기준으로 판단해야, 파산자가 섞여 있어도 실제 대결 인원 기준으로 정확히 헤즈업
+        // 규칙이 적용된다.
+        boolean headsUp = playersWithChips == 2;
         postBlinds(headsUp);
         dealHoleCards();
 
@@ -78,15 +81,32 @@ public class GameEngine {
     private void dealHoleCards() {
         for (int i = 0; i < 2; i++) {
             for (Player player : room.getPlayers()) {
-                player.receiveHoleCard(room.getDeck().draw());
+                // 파산한 플레이어는 이번 핸드에 참여하지 않으므로 홀카드를 받지 않는다.
+                if (player.getStatus() != PlayerStatus.BUSTED) {
+                    player.receiveHoleCard(room.getDeck().draw());
+                }
             }
         }
     }
 
+    // 버튼 좌석 기준 offset번째 "파산하지 않은" 좌석을 반환한다. offset=0은 버튼 자신(항상 파산하지
+    // 않은 좌석 — moveButtonToNextSeat가 보장), offset=1은 그다음 파산하지 않은 좌석, ... 순서로
+    // 파산한 좌석은 건너뛰고 센다. 그래야 파산자가 섞여 있어도 스몰/빅블라인드가 실제 참여 인원
+    // 기준으로 정확히 배정된다.
     private Player playerAtOffset(int offset) {
         List<Player> players = room.getPlayers();
-        int index = (room.getDealerButtonPosition() + offset) % players.size();
-        return players.get(index);
+        int seatCount = players.size();
+        int index = room.getDealerButtonPosition();
+        int count = 0;
+        while (true) {
+            if (players.get(index).getStatus() != PlayerStatus.BUSTED) {
+                if (count == offset) {
+                    return players.get(index);
+                }
+                count++;
+            }
+            index = (index + 1) % seatCount;
+        }
     }
 
     // 버튼 왼쪽(다음 좌석)부터 시계방향으로 몇 번째 자리인지. 버튼 본인이 가장 마지막(맨 뒤) 순위가 된다.
@@ -102,13 +122,17 @@ public class GameEngine {
         currentBettingRound = new BettingRound(room.getPlayers(), activePlayers, currentBet, minimumRaise);
     }
 
-    // startOffset 좌석부터 시계방향으로 순회하며 아직 ACTIVE(폴드/올인 아님)인 플레이어만 순서대로 반환한다.
+    // 버튼 좌석 기준 startOffset번째 자리부터 시계방향으로 순회하며 아직 ACTIVE(폴드/올인/파산
+    // 아님)인 플레이어만 순서대로 반환한다. startOffset은 playerAtOffset과 동일하게 "버튼으로부터
+    // 몇 자리 뒤인지"를 뜻하므로, 실제 좌석 인덱스로 변환하려면 버튼 위치를 더해야 한다 — 이걸
+    // 빠뜨리면 버튼이 0번 좌석이 아닌 두 번째 핸드부터 첫 액션자가 잘못 계산된다.
     private List<Player> activePlayersFrom(int startOffset) {
         List<Player> players = room.getPlayers();
         int seatCount = players.size();
+        int base = room.getDealerButtonPosition() + startOffset;
         List<Player> ordered = new ArrayList<>();
         for (int i = 0; i < seatCount; i++) {
-            Player player = players.get((startOffset + i) % seatCount);
+            Player player = players.get((base + i) % seatCount);
             if (player.getStatus() == PlayerStatus.ACTIVE) {
                 ordered.add(player);
             }
@@ -121,7 +145,7 @@ public class GameEngine {
         currentBettingRound.applyAction(actor, action, amount);
 
         long remaining = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED)
+                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
                 .count();
         if (remaining <= 1) {
             // 전원 폴드로 한 명만 남으면 쇼다운 없이 즉시 핸드를 종료한다.
@@ -137,7 +161,7 @@ public class GameEngine {
     private void finishHandByFold() {
         room.setPots(PotCalculator.calculate(room.getPlayers()));
         Player winner = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED)
+                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
                 .findFirst()
                 .orElseThrow();
         int totalPot = room.getPots().stream().mapToInt(Pot::amount).sum();
@@ -190,7 +214,7 @@ public class GameEngine {
         room.setPots(PotCalculator.calculate(room.getPlayers()));
 
         List<Player> inHand = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED)
+                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
                 .toList();
 
         Map<String, EvaluatedHand> handsByPlayerId = new HashMap<>();

@@ -5,6 +5,7 @@ import com.lbg0146.backend.card.Deck;
 import com.lbg0146.backend.exception.GameStateException;
 import com.lbg0146.backend.game.ShowdownResult;
 import com.lbg0146.backend.player.Player;
+import com.lbg0146.backend.player.PlayerStatus;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -39,11 +40,22 @@ public class Room {
         players.add(player);
     }
 
-    // 딜러 버튼을 다음 좌석(players 리스트 순서 기준)으로 이동한다.
+    // 딜러 버튼을 다음 좌석(players 리스트 순서 기준)으로 이동한다. 파산(BUSTED)한 좌석은
+    // 건너뛰고, 그다음으로 만나는 파산하지 않은 좌석에 버튼이 온다.
     public void moveButtonToNextSeat() {
         if (players.isEmpty()) {
             throw new GameStateException("좌석에 플레이어가 없습니다.");
         }
+        int next = dealerButtonPosition;
+        for (int i = 0; i < players.size(); i++) {
+            next = (next + 1) % players.size();
+            if (players.get(next).getStatus() != PlayerStatus.BUSTED) {
+                dealerButtonPosition = next;
+                return;
+            }
+        }
+        // 파산하지 않은 좌석이 하나도 없는 비정상 상황 — 호출 측(GameEngine.startHand)이 이미
+        // 칩 있는 플레이어 2명 이상을 검증하므로 실제로는 일어나지 않는다. 방어적으로만 처리한다.
         dealerButtonPosition = (dealerButtonPosition + 1) % players.size();
     }
 

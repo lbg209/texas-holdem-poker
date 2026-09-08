@@ -42,19 +42,25 @@ export function resolveHandWinners(state: RoomStateResponse): string[] {
   if (state.showdownHands) {
     return state.showdownHands.filter((h) => h.isWinner).map((h) => h.playerId);
   }
-  return state.players.filter((p) => p.status !== 'FOLDED').map((p) => p.id);
+  // BUSTED는 이번 핸드에 아예 참여하지 않은 좌석이라 "폴드하지 않음" 조건만으로는 승자에
+  // 잘못 포함될 수 있다(파산 상태는 FOLDED가 아니므로) — 명시적으로 제외한다.
+  return state.players.filter((p) => p.status !== 'FOLDED' && p.status !== 'BUSTED').map((p) => p.id);
 }
 
 function findPlayer(players: PlayerView[], id: string): PlayerView | undefined {
   return players.find((p) => p.id === id);
 }
 
-// 버튼 다음 좌석부터 시계방향으로 딜링 순서를 만든다.
+// 버튼 다음 좌석부터 시계방향으로 딜링 순서를 만든다. 파산(BUSTED)한 좌석은 이번 핸드에
+// 홀카드를 받지 않으므로(백엔드가 애초에 안 보냄) 딜링 연출 대상에서도 제외한다.
 function dealOrder(players: PlayerView[], buttonPosition: number): PlayerView[] {
   const count = players.length;
   const order: PlayerView[] = [];
   for (let i = 1; i <= count; i++) {
-    order.push(players[(buttonPosition + i) % count]);
+    const player = players[(buttonPosition + i) % count];
+    if (player.status !== 'BUSTED') {
+      order.push(player);
+    }
   }
   return order;
 }
