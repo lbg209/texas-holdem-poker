@@ -46,10 +46,11 @@ public class RoomController {
         return ResponseEntity.status(HttpStatus.CREATED).body(new JoinPlayerResponse(playerId));
     }
 
+    // playerId를 안 주면 GET /api/room과 동일하게 관전자 시점으로 응답한다.
     @PostMapping("/hands")
-    public RoomStateResponse startHand() {
+    public RoomStateResponse startHand(@RequestParam(required = false) String playerId) {
         gameEngine.startHand();
         broadcaster.broadcastState();
-        return gameEngine.withLock(() -> RoomStateMapper.toResponse(gameEngine, null));
+        return gameEngine.withLock(() -> RoomStateMapper.toResponse(gameEngine, playerId));
     }
 }

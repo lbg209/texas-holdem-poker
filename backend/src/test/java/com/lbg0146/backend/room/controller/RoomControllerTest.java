@@ -113,4 +113,15 @@ class RoomControllerTest {
         assertEquals(0, findPlayer(asAlice, bobId).holeCards().size());
         assertEquals(0, findPlayer(asSpectator, aliceId).holeCards().size());
     }
+
+    @Test
+    void 핸드_시작_응답도_playerId를_주면_본인_홀카드가_바로_보인다() throws Exception {
+        String aliceId = join("Alice");
+        String bobId = join("Bob");
+
+        RoomStateResponse asAlice = readRoomState(post("/api/room/hands").param("playerId", aliceId));
+
+        assertEquals(2, findPlayer(asAlice, aliceId).holeCards().size());
+        assertEquals(0, findPlayer(asAlice, bobId).holeCards().size());
+    }
 }
