@@ -11,11 +11,13 @@ import java.util.List;
 // 단일 고정 테이블의 상태를 담는 객체. 게임 진행/계산 로직은 game 패키지(GameEngine 등)가 담당한다.
 public class Room {
 
-    public static final int SMALL_BLIND = 50;
-    public static final int BIG_BLIND = 100;
-    public static final int STARTING_CHIPS = 10_000;
+    public static final int SMALL_BLIND = 100;
+    public static final int BIG_BLIND = 200;
+    public static final int STARTING_CHIPS = 30_000;
     public static final int MIN_PLAYERS = 2;
     public static final int MAX_PLAYERS = 6;
+    // BET/RAISE 금액은 이 단위의 배수여야 한다. 단, 보유 칩 전부를 거는 경우(사실상 올인)는 예외로 허용한다.
+    public static final int BET_UNIT = 100;
 
     private final List<Player> players = new ArrayList<>();
     private final List<Card> communityCards = new ArrayList<>();

@@ -47,6 +47,20 @@ class GameEngineTest {
     }
 
     @Test
+    void 보유_칩을_초과하는_RAISE는_거부된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("p1", "P1", 1000));
+        room.addPlayer(new Player("p2", "P2", 300));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand(); // 헤즈업: 버튼=p1(SB,50), BB=p2(100), 프리플랍 첫 액션=p1
+        engine.applyAction("p1", PlayerAction.CALL, 0); // p1이 100으로 콜, p2 차례
+
+        // p2는 currentRoundBet 100 + 남은 칩 200 = 최대 300까지만 RAISE 가능한데 1000을 요청
+        assertThrows(InvalidActionException.class, () -> engine.applyAction("p2", PlayerAction.RAISE, 1000));
+    }
+
+    @Test
     void 헤즈업에서는_버튼이_스몰블라인드이고_먼저_액션한다() {
         Room room = new Room();
         room.addPlayer(new Player("p1", "P1", Room.STARTING_CHIPS));

@@ -4,6 +4,7 @@ import com.lbg0146.backend.exception.InvalidActionException;
 import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerAction;
 import com.lbg0146.backend.player.PlayerStatus;
+import com.lbg0146.backend.room.Room;
 
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -61,13 +62,13 @@ public class BettingRound {
                 if (currentBet != 0) {
                     throw new InvalidActionException("이미 베팅이 있어 BET을 할 수 없습니다. RAISE를 사용하세요.");
                 }
-                validateRaise(pending.canRaise(), amount);
+                validateRaise(actor, pending.canRaise(), amount);
             }
             case RAISE -> {
                 if (currentBet == 0) {
                     throw new InvalidActionException("아직 베팅이 없어 RAISE를 할 수 없습니다. BET을 사용하세요.");
                 }
-                validateRaise(pending.canRaise(), amount);
+                validateRaise(actor, pending.canRaise(), amount);
             }
             case FOLD, CALL, ALL_IN -> {
                 // 별도 사전 검증 없음
@@ -95,9 +96,17 @@ public class BettingRound {
         }
     }
 
-    private void validateRaise(boolean canRaise, int newTotal) {
+    private void validateRaise(Player actor, boolean canRaise, int newTotal) {
         if (!canRaise) {
             throw new InvalidActionException("short all-in 이후에는 콜/폴드만 가능하며 다시 레이즈할 수 없습니다.");
+        }
+        int actorMax = actor.getCurrentRoundBet() + actor.getChips();
+        if (newTotal > actorMax) {
+            throw new InvalidActionException("보유 칩을 초과하는 금액입니다. 최대 " + actorMax + "까지 가능하며, 전액을 걸려면 ALL_IN을 사용하세요.");
+        }
+        // 보유 칩 전부를 거는 경우(사실상 올인)는 100단위가 아니어도 허용한다.
+        if (newTotal != actorMax && newTotal % Room.BET_UNIT != 0) {
+            throw new InvalidActionException(Room.BET_UNIT + " 단위로만 베팅/레이즈할 수 있습니다.");
         }
         if (newTotal < currentBet + minimumRaise) {
             throw new InvalidActionException("최소 레이즈 총액(" + (currentBet + minimumRaise) + ") 미만입니다.");

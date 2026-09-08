@@ -2,6 +2,7 @@ package com.lbg0146.backend.room.controller;
 
 import com.lbg0146.backend.game.BettingRound;
 import com.lbg0146.backend.game.GameEngine;
+import com.lbg0146.backend.game.PotCalculator;
 import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerStatus;
 import com.lbg0146.backend.room.Phase;
@@ -29,7 +30,10 @@ public class RoomStateMapper {
         List<CardView> communityCards = room.getCommunityCards().stream()
                 .map(CardView::from)
                 .toList();
-        List<PotView> pots = room.getPots().stream()
+        // room.pots는 핸드 종료 시 실제 정산에만 쓰이는 필드라 베팅 중엔 비어 있다. 조회 응답은
+        // 항상 그 시점 기준의 실시간 팟을 보여줘야 하므로, GameEngine의 정산 로직과 별개로
+        // totalHandContribution을 기준 삼아 매번 다시 계산한다(핸드 종료 후에도 같은 값이 나온다).
+        List<PotView> pots = PotCalculator.calculate(room.getPlayers()).stream()
                 .map(pot -> PotView.from(pot, room.getPlayers()))
                 .toList();
 
