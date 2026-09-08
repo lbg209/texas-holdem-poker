@@ -10,18 +10,24 @@ interface BetBuilderProps {
   onConfirm: (amount: number) => void;
 }
 
-// amount는 백엔드 계약대로 "이번 스트리트에 낼 총액"이다 — 증가분이 아니라 항상 최종 총액을 그대로 보낸다.
-// 초기값은 최소 합법 총액(minTotal)이고, 칩 버튼은 여기에 더해진다 (예: 최소 2,000에서 +500 -> 2,500).
+// amount는 백엔드 계약대로 "이번 스트리트에 낼 총액"이 아니라, 칩 버튼으로 쌓아올린 "추가로 걸고
+// 싶은 금액"이다(항상 0부터 시작 — 최소 총액에서 시작하면 +1,000을 눌러도 애매한 숫자가 나와
+// 암산이 힘들다는 피드백으로 바꿈). 실제로 보낼 금액(effectiveAmount)은 확정 버튼에서만 계산한다:
+// amount가 최소 총액(minTotal)보다 작으면 minTotal 그대로, 그 이상이면 amount 그대로 보낸다.
 export function BetBuilder({ minTotal, maxTotal, actionLabel, onConfirm }: BetBuilderProps) {
-  const [amount, setAmount] = useState(minTotal);
+  const [amount, setAmount] = useState(0);
 
-  // 상대 액션으로 최소 합법 총액이 바뀌면(예: 재레이즈) 빌더도 새 최소치로 다시 맞춘다.
+  // 상대 액션으로 최소 합법 총액이 바뀌면(예: 재레이즈) 지금까지 쌓던 금액은 그 상황엔 안 맞을 수
+  // 있으니 다시 0부터 시작한다.
   useEffect(() => {
-    setAmount(minTotal);
+    setAmount(0);
   }, [minTotal]);
 
   const addChip = (chip: number) => setAmount((prev) => Math.min(prev + chip, maxTotal));
-  const reset = () => setAmount(minTotal);
+  const reset = () => setAmount(0);
+
+  const effectiveAmount = Math.max(amount, minTotal);
+  const isMinimum = amount < minTotal;
 
   return (
     <div className="flex flex-col items-center gap-2 rounded-lg bg-gradient-to-b from-slate-700 to-slate-900 p-3 shadow-inner">
@@ -46,9 +52,10 @@ export function BetBuilder({ minTotal, maxTotal, actionLabel, onConfirm }: BetBu
       </div>
       <button
         className="rounded bg-gradient-to-b from-sky-500 to-sky-700 px-4 py-1.5 text-sm font-medium shadow-md active:shadow-inner"
-        onClick={() => onConfirm(amount)}
+        onClick={() => onConfirm(effectiveAmount)}
       >
-        {actionLabel === 'BET' ? '베팅' : '레이즈'} {formatMoney(amount)}
+        {actionLabel === 'BET' ? '베팅' : '레이즈'} {formatMoney(effectiveAmount)}
+        {isMinimum && ' (최소)'}
       </button>
     </div>
   );

@@ -5,12 +5,15 @@ import { BetBuilder } from './BetBuilder';
 
 export function ActionBar() {
   const { state, sendAction } = useRoom();
-  const roomState = state.roomState;
-  if (!roomState) {
+  // roomState(진짜 최신 상태)가 아니라 displayState를 기준으로 판단한다 — 스트리트가 넘어가는
+  // 애니메이션이 재생되는 동안에는 실제로 이미 다음 차례여도, 화면이 따라잡을 때까지 액션 버튼도
+  // 같이 "얼려둬야" 미리 눌러도 애니메이션을 건너뛰고 즉시 처리돼버리는 문제가 없다.
+  const displayState = state.displayState;
+  if (!displayState) {
     return null;
   }
 
-  const legal = computeLegalActions(roomState, state.myPlayerId);
+  const legal = computeLegalActions(displayState, state.myPlayerId);
   if (!legal) {
     return (
       <div className="rounded-lg bg-gradient-to-b from-slate-800 to-slate-950 px-4 py-3 text-sm text-slate-400 shadow-xl">

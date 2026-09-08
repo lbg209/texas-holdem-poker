@@ -5,6 +5,8 @@ import { clearStoredPlayerId, getStoredPlayerId, storePlayerId } from './playerI
 import { useRoomSocket } from '../ws/useRoomSocket';
 import type { ConnectionStatus, ServerMessage } from '../ws/useRoomSocket';
 import type { PlayerActionType, RoomStateResponse } from '../types/room';
+import { useTableAnimationQueue } from './useTableAnimationQueue';
+import type { ActiveVisualEvent } from './tableAnimation';
 
 const ERROR_AUTO_DISMISS_MS = 6000;
 
@@ -41,7 +43,17 @@ function reducer(state: RoomState, action: Action): RoomState {
 }
 
 interface RoomContextValue {
-  state: RoomState & { connectionStatus: ConnectionStatus };
+  state: RoomState & {
+    connectionStatus: ConnectionStatus;
+    // 테이블에 실제로 그려지는(그리고 "지금 내 차례인지" 판단에도 쓰이는), 애니메이션 큐로 지연
+    // 재생되는 상태. roomState(진짜 최신 상태)와 달리 액션 표시/칩 이동/카드 등장이 끝날 때까지
+    // 옛 값에 머물러 있을 수 있다 — ActionBar가 roomState를 직접 보면, 화면은 옛 스트리트를
+    // 보여주는데 이미 새 스트리트 기준으로 액션 버튼이 활성화되는 문제가 있어 여기서 통일한다.
+    displayState: RoomStateResponse | null;
+    activeVisualEvent: ActiveVisualEvent | null;
+    // 새 핸드 딜링 중에만 값이 있는, 좌석별 "지금까지 몇 장 뒷면으로 놓였는지" 연출 전용 카운터.
+    dealProgress: Record<string, number> | null;
+  };
   join: (nickname: string) => Promise<void>;
   refreshState: () => Promise<void>;
   startNewHand: () => Promise<void>;
@@ -102,6 +114,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const { connectionStatus, sendAction, reconnect } = useRoomSocket(state.myPlayerId, handleWsMessage);
+  const { displayState, activeVisualEvent, dealProgress } = useTableAnimationQueue(state.roomState);
 
   const join = async (nickname: string) => {
     try {
@@ -137,7 +150,15 @@ export function RoomProvider({ children }: { children: ReactNode }) {
 
   return (
     <RoomContext.Provider
-      value={{ state: { ...state, connectionStatus }, join, refreshState, startNewHand, sendAction, reconnect, clearError }}
+      value={{
+        state: { ...state, connectionStatus, displayState, activeVisualEvent, dealProgress },
+        join,
+        refreshState,
+        startNewHand,
+        sendAction,
+        reconnect,
+        clearError,
+      }}
     >
       {children}
     </RoomContext.Provider>

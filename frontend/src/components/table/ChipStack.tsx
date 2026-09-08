@@ -1,5 +1,10 @@
+import { motion } from 'framer-motion';
+
 interface ChipStackProps {
   amount: number;
+  // 주어지면 같은 layoutId를 가진 다른 ChipStack(예: FlyingChips)과의 전환을 Framer Motion이
+  // 자동으로 위치/크기 보간 애니메이션(FLIP)으로 이어준다 — "이 더미가 그대로 이동한다"는 느낌.
+  layoutId?: string;
 }
 
 interface Tier {
@@ -42,7 +47,7 @@ function Chip() {
   );
 }
 
-export function ChipStack({ amount }: ChipStackProps) {
+export function ChipStack({ amount, layoutId }: ChipStackProps) {
   if (amount <= 0) {
     return null;
   }
@@ -50,7 +55,7 @@ export function ChipStack({ amount }: ChipStackProps) {
   const tier = pickTier(amount);
 
   return (
-    <div className="flex items-end gap-1.5">
+    <motion.div layoutId={layoutId} className="flex items-end gap-1.5">
       {Array.from({ length: tier.piles }).map((_, pileIndex) => (
         <div key={pileIndex} className="flex flex-col-reverse">
           {Array.from({ length: tier.chipsPerPile }).map((_, chipIndex) => (
@@ -60,6 +65,6 @@ export function ChipStack({ amount }: ChipStackProps) {
           ))}
         </div>
       ))}
-    </div>
+    </motion.div>
   );
 }

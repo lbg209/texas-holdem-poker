@@ -11,7 +11,9 @@ interface SeatLayoutProps {
   showCards: boolean;
   showdownHands: ShowdownHandView[] | null;
   winnerCards: CardView[];
+  winnerPlayerIds: string[];
   phase: Phase | null;
+  dealProgress: Record<string, number> | null;
 }
 
 export function SeatLayout({
@@ -22,7 +24,9 @@ export function SeatLayout({
   showCards,
   showdownHands,
   winnerCards,
+  winnerPlayerIds,
   phase,
+  dealProgress,
 }: SeatLayoutProps) {
   const count = players.length;
   const positions = computeSeatPositions(count);
@@ -49,7 +53,9 @@ export function SeatLayout({
             isChipLeader={isUniqueChipLeader && player.chips === maxChips}
             showdownHand={showdownHands?.find((hand) => hand.playerId === player.id) ?? null}
             winnerCards={winnerCards}
+            isWinner={winnerPlayerIds.includes(player.id)}
             handEnded={phase === 'SHOWDOWN'}
+            dealtPlaceholderCount={dealProgress ? (dealProgress[player.id] ?? 0) : undefined}
           />
         );
       })}

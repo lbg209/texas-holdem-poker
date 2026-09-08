@@ -18,9 +18,14 @@ function RoomGate() {
   return (
     <>
       <TableHeader />
-      {state.roomState && (
+      {state.displayState && (
         <>
-          <PokerTable roomState={state.roomState} myPlayerId={state.myPlayerId} />
+          <PokerTable
+            displayState={state.displayState}
+            activeVisualEvent={state.activeVisualEvent}
+            dealProgress={state.dealProgress}
+            myPlayerId={state.myPlayerId}
+          />
           <div className="fixed bottom-4 right-4 z-20">
             <ActionBar />
           </div>
