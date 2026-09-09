@@ -153,8 +153,18 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
   //    경우(마지막 콜/체크 등)에는 서버가 같은 응답 안에서 다음 스트리트로 넘기며 전원의 lastAction을
   //    이미 null로 리셋해버려서, next에는 그 액션의 흔적이 지워진 채로 온다. 대신 prev.currentActorId
   //    ("직전까지 누구 차례였는지")는 그 리셋과 무관하게 이번 diff에서 액션한 사람을 정확히 알려준다.
+  //    단, currentActorId가 실제로 바뀌었을 때만(또는 스트리트가 넘어갔을 때만) "액션했다"고
+  //    판단해야 한다 — 레디 토글처럼 액션과 무관한 이유로 broadcastState가 다시 불렸을 뿐인데
+  //    currentActorId(및 그 사람)가 그대로면, 액션도 안 했는데 CHECK 라벨이 잘못 붙었다 사라지는
+  //    문제가 있었다. currentActorId 비교만으로는 부족한 경우도 있다 — 좌석 배치상 어떤 스트리트의
+  //    마지막 액션자가 우연히 다음 스트리트의 첫 액션자와 같은 사람일 수 있는데(예: 프리플랍 마지막
+  //    콜을 한 사람이 플랍 첫 액션자이기도 한 경우), 그러면 currentActorId 값 자체는 안 바뀌어서
+  //    "액션했다"는 판단을 놓치고 얼림(freeze)도 건너뛰게 되어, 카드가 뒤집히는 동안에도 화면에
+  //    옛 스트리트의 베팅 버튼이 그대로 남는 문제가 있었다. phase가 바뀌었으면(스트리트가 넘어갔으면)
+  //    currentActorId가 우연히 같아도 무조건 "액션했다"로 취급해서 이 경우를 함께 잡는다.
   const actorId = prev.currentActorId;
-  const actedIds = actorId !== null && findPlayer(next.players, actorId) ? [actorId] : [];
+  const actorChanged = next.currentActorId !== prev.currentActorId || next.phase !== prev.phase;
+  const actedIds = actorChanged && actorId !== null && findPlayer(next.players, actorId) ? [actorId] : [];
 
   // 액션한 사람의 "액션 직후 & 리셋되기 전" 베팅액/라벨을 totalHandContribution 증가분으로 역산한다.
   // lastAction이 리셋으로 사라졌다면(체크/콜이 라운드를 끝낸 경우) 증가분 유무로 CHECK/CALL을 추정해
@@ -183,8 +193,17 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
     steps.push({
       visualEvent: null,
       durationMs: ACTION_HOLD_MS,
+      // 이번 액션으로 차례가 넘어가는 중이므로, 이 스텝부터 이번 diff 사이클이 끝날 때까지
+      // (칩 이동/커뮤니티 카드 공개 연출이 다 끝나 finishCycle이 진짜 최신 상태로 스냅할 때까지)
+      // currentActorId/currentBet/minimumRaise를 얼려둔다(null) — 그대로 옛 값을 유지하면, 예를
+      // 들어 A가 콜해서 다음 스트리트로 넘어가는 도중에도 화면엔 "A 차례, 옛 currentBet" 그대로
+      // 남아 베팅 버튼이 계속 눌리는 상태가 되고, 하필 새 스트리트도 A 차례면 카드가 채 열리기도
+      // 전에 그 버튼을 눌러 실수로 액션이 그대로 서버에 전송돼버리는 문제가 있었다.
       patch: (state) => ({
         ...state,
+        currentActorId: null,
+        currentBet: null,
+        minimumRaise: null,
         players: state.players.map((p) => {
           if (!actedIds.includes(p.id)) {
             return p;

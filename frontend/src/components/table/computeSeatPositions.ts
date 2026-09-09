@@ -21,7 +21,9 @@ const MIN_INFO_TOP_PERCENT = 6;
 // 내 카드(하단, 화면과 가장 가까움)가 다른 좌석보다 원래도 커 보이는데, 지금 크기가 너무
 // 크다는 피드백이 있어 SCALE_NEAR를 1보다 낮췄다.
 const SCALE_NEAR = 0.85;
-const SCALE_FAR = 0.5;
+// 상대(맞은편에 가까운 좌석)의 정보박스가 너무 작다는 피드백으로 SCALE_FAR를 올렸다 — depth=0(내
+// 좌석)에는 SCALE_NEAR만 적용되므로, 이 값만 올리면 내 좌석 크기는 그대로 두고 먼 좌석만 커진다.
+const SCALE_FAR = 0.68;
 
 // count명을 타원형으로 배치한다. index 0은 항상 하단 중앙이고, index가 커질수록 시계방향으로 이동한다.
 // 실제 "내 좌석을 하단에 고정"하는 회전은 호출 측(SeatLayout)에서 rotatedIndex를 넘겨서 처리한다.
