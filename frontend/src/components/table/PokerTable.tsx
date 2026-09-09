@@ -8,6 +8,7 @@ import { PotDisplay } from './PotDisplay';
 import { FlyingChips } from './FlyingChips';
 import { BetPiles } from './BetPiles';
 import { DealingCards } from './DealingCards';
+import { GameOverOverlay } from './GameOverOverlay';
 
 interface PokerTableProps {
   // 액션 표시 -> 칩 이동 -> 카드 등장 순서로 지연 재생되는 상태. RoomContext가 큐를 한 번만
@@ -21,10 +22,10 @@ interface PokerTableProps {
 export function PokerTable({ displayState, activeVisualEvent, dealProgress, myPlayerId }: PokerTableProps) {
   const handInProgress = displayState.phase !== null;
   const winnerPlayerIds = resolveHandWinners(displayState);
-  // 승자가 실제로 족보를 만드는 데 쓴 카드만 하이라이트한다 — 같은 등급의 진 상대와 실제로
-  // 비교해서 몇 번째 킥커까지가 승부를 갈랐는지 계산하므로, 양쪽 다 같은 1등 킥커를 가졌는데
-  // 2등 킥커에서 갈린 경우에도 진짜 결정타 킥커가 강조된다(무관한 1등 킥커만 강조되지 않음).
-  // 스플릿팟이면 승자 전원의 합집합.
+  // 승자가 실제로 족보를 만드는 데 쓴 카드만, 그 족보 등급에 맞는 색상과 함께 하이라이트한다 —
+  // 같은 등급의 진 상대와 실제로 비교해서 몇 번째 킥커까지가 승부를 갈랐는지 계산하므로, 양쪽 다
+  // 같은 1등 킥커를 가졌는데 2등 킥커에서 갈린 경우에도 진짜 결정타 킥커가 강조된다(무관한 1등
+  // 킥커만 강조되지 않음). 스플릿팟이면 승자 전원의 합집합.
   const winnerCards =
     displayState.showdownHands
       ?.filter((hand) => hand.isWinner)
@@ -37,7 +38,7 @@ export function PokerTable({ displayState, activeVisualEvent, dealProgress, myPl
       <div className="absolute left-1/2 top-1/2 z-40 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2">
         <CommunityCards cards={displayState.communityCards} highlightCards={winnerCards} />
         <PotDisplay pots={displayState.pots} players={displayState.players} />
-        {!handInProgress && <span className="text-sm text-emerald-200">참가자 대기 중</span>}
+        {!handInProgress && <span className="text-sm text-emerald-200">⏳ 게임 준비 중...</span>}
       </div>
 
       <SeatLayout
@@ -51,11 +52,19 @@ export function PokerTable({ displayState, activeVisualEvent, dealProgress, myPl
         winnerPlayerIds={winnerPlayerIds}
         phase={displayState.phase}
         dealProgress={dealProgress}
+        turnDeadlineAtMillis={displayState.turnDeadlineAtMillis}
       />
 
       <BetPiles players={displayState.players} myPlayerId={myPlayerId} />
       <FlyingChips event={activeVisualEvent} players={displayState.players} myPlayerId={myPlayerId} />
       <DealingCards event={activeVisualEvent} players={displayState.players} myPlayerId={myPlayerId} />
+
+      {/* displayState 기준 — 마지막 핸드의 연출(칩 이동/승자 하이라이트)이 다 재생된 뒤에만 뜬다. */}
+      {displayState.winnerId && (
+        <GameOverOverlay
+          winnerNickname={displayState.players.find((p) => p.id === displayState.winnerId)?.nickname ?? '알 수 없음'}
+        />
+      )}
     </div>
   );
 }
