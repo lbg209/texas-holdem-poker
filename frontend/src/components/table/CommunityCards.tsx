@@ -1,10 +1,11 @@
 import type { CardView } from '../../types/room';
-import { containsCard } from '../../lib/handRank';
+import type { HighlightedCard } from '../../lib/handRank';
+import { findHighlightColor } from '../../lib/handRank';
 import { RevealCard } from './RevealCard';
 
 interface CommunityCardsProps {
   cards: CardView[];
-  highlightCards?: CardView[];
+  highlightCards?: HighlightedCard[];
 }
 
 const NORMAL_FLIP_DELAY_MS = 150;
@@ -22,13 +23,15 @@ export function CommunityCards({ cards, highlightCards }: CommunityCardsProps) {
     <div className="flex scale-90 gap-1.5 sm:gap-2">
       {cards.map((card, i) => {
         const isSlow = i >= FLOP_CARD_COUNT;
+        const color = highlightCards ? findHighlightColor(highlightCards, card) : null;
         return (
           // key가 인덱스라 배열에 새 카드가 추가될 때만 새로 마운트되고(핸드 중 카드는 줄거나
           // 순서가 바뀌지 않음), 그때 RevealCard의 딜인->뒤집기 연출이 한 번만 재생된다.
           <RevealCard
             key={i}
             card={card}
-            highlighted={highlightCards ? containsCard(highlightCards, card) : false}
+            highlighted={color !== null}
+            highlightColor={color ?? undefined}
             flipDelayMs={isSlow ? SLOW_FLIP_DELAY_MS : NORMAL_FLIP_DELAY_MS}
             flipDurationMs={isSlow ? SLOW_FLIP_DURATION_MS : NORMAL_FLIP_DURATION_MS}
           />

@@ -1,4 +1,5 @@
-import type { CardView, Phase, PlayerView, ShowdownHandView } from '../../types/room';
+import type { Phase, PlayerView, ShowdownHandView } from '../../types/room';
+import type { HighlightedCard } from '../../lib/handRank';
 import { computeSeatPositions } from './computeSeatPositions';
 import { computePosition } from '../../lib/positions';
 import { PlayerSeat } from './PlayerSeat';
@@ -10,10 +11,11 @@ interface SeatLayoutProps {
   currentActorId: string | null;
   showCards: boolean;
   showdownHands: ShowdownHandView[] | null;
-  winnerCards: CardView[];
+  winnerCards: HighlightedCard[];
   winnerPlayerIds: string[];
   phase: Phase | null;
   dealProgress: Record<string, number> | null;
+  turnDeadlineAtMillis: number | null;
 }
 
 export function SeatLayout({
@@ -27,6 +29,7 @@ export function SeatLayout({
   winnerPlayerIds,
   phase,
   dealProgress,
+  turnDeadlineAtMillis,
 }: SeatLayoutProps) {
   const count = players.length;
   const positions = computeSeatPositions(count);
@@ -56,6 +59,7 @@ export function SeatLayout({
             isWinner={winnerPlayerIds.includes(player.id)}
             handEnded={phase === 'SHOWDOWN'}
             dealtPlaceholderCount={dealProgress ? (dealProgress[player.id] ?? 0) : undefined}
+            turnDeadlineAtMillis={turnDeadlineAtMillis}
           />
         );
       })}
