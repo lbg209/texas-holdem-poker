@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useReducer } from 'react';
 import type { ReactNode } from 'react';
-import { getRoomState, joinRoom, startHand } from '../api/roomApi';
+import { decideShowdownReveal, getRoomState, joinRoom, revealFoldWinHand, setReady, startHand } from '../api/roomApi';
 import { clearStoredPlayerId, getStoredPlayerId, storePlayerId } from './playerIdStorage';
 import { useRoomSocket } from '../ws/useRoomSocket';
 import type { ConnectionStatus, ServerMessage } from '../ws/useRoomSocket';
@@ -57,6 +57,9 @@ interface RoomContextValue {
   join: (nickname: string) => Promise<void>;
   refreshState: () => Promise<void>;
   startNewHand: () => Promise<void>;
+  toggleReady: (ready: boolean) => Promise<void>;
+  revealHand: () => Promise<void>;
+  decideReveal: (reveal: boolean) => Promise<void>;
   sendAction: (action: PlayerActionType, amount: number) => void;
   reconnect: () => void;
   clearError: () => void;
@@ -146,6 +149,42 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  const toggleReady = async (ready: boolean) => {
+    if (!state.myPlayerId) {
+      return;
+    }
+    try {
+      const roomState = await setReady(state.myPlayerId, ready);
+      dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
+    } catch (e) {
+      dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
+    }
+  };
+
+  const revealHand = async () => {
+    if (!state.myPlayerId) {
+      return;
+    }
+    try {
+      const roomState = await revealFoldWinHand(state.myPlayerId);
+      dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
+    } catch (e) {
+      dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
+    }
+  };
+
+  const decideReveal = async (reveal: boolean) => {
+    if (!state.myPlayerId) {
+      return;
+    }
+    try {
+      const roomState = await decideShowdownReveal(state.myPlayerId, reveal);
+      dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
+    } catch (e) {
+      dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
+    }
+  };
+
   const clearError = () => dispatch({ type: 'CLEAR_ERROR' });
 
   return (
@@ -155,6 +194,9 @@ export function RoomProvider({ children }: { children: ReactNode }) {
         join,
         refreshState,
         startNewHand,
+        toggleReady,
+        revealHand,
+        decideReveal,
         sendAction,
         reconnect,
         clearError,

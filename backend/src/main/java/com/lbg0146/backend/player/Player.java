@@ -23,6 +23,10 @@ public class Player {
     // 이번 핸드가 시작되기 직전(블라인드 걷기 전)의 칩 보유량. 핸드 종료 후 손익(chips - chipsAtHandStart)을
     // 계산하는 기준점이 된다.
     private int chipsAtHandStart;
+    // 다음 핸드 자동 시작에 동의했는지. 핸드 진행 여부와 무관하게 언제든 토글 가능하며,
+    // resetForNewHand()가 초기화하지 않는다 — 한 번 켜두면 계속 유지된다(다음 핸드에도, 그 다음
+    // 핸드에도). 잠깐 자리를 비우고 싶으면 직접 꺼야 한다.
+    private boolean ready;
 
     public Player(String id, String nickname, int chips) {
         this.id = id;
@@ -107,5 +111,13 @@ public class Player {
 
     public int getChipsAtHandStart() {
         return chipsAtHandStart;
+    }
+
+    public boolean isReady() {
+        return ready;
+    }
+
+    public void setReady(boolean ready) {
+        this.ready = ready;
     }
 }

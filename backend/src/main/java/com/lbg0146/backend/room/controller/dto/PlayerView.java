@@ -20,6 +20,7 @@ public record PlayerView(
         int totalHandContribution,
         PlayerAction lastAction,
         int netChipChange,
-        List<CardView> holeCards
+        List<CardView> holeCards,
+        boolean ready
 ) {
 }
