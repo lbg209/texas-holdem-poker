@@ -8,7 +8,9 @@ import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerStatus;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 // 단일 고정 테이블의 상태를 담는 객체. 게임 진행/계산 로직은 game 패키지(GameEngine 등)가 담당한다.
 public class Room {
@@ -32,6 +34,22 @@ public class Room {
     private boolean wonByFold;
     // 가장 최근 쇼다운 결과(족보/승자). 다음 핸드가 시작되기 전까지 유지되며, 그 사이 조회 응답에 노출된다.
     private ShowdownResult lastShowdownResult;
+    // 폴드로 종료된 핸드의 승자 id(wonByFold=true일 때만 의미 있음). 그 승자가 자원해서 카드를
+    // 공개할 수 있는 대상을 판단하는 데 쓰인다.
+    private String foldWinWinnerId;
+    // 이번 핸드에서 "기본 공개 규칙과 무관하게" 카드가 보이기로 확정된 플레이어 id 모음 —
+    // 폴드승 승자가 자원 공개를 선택한 경우, 그리고 헤즈업 쇼다운에서 무작위로 뽑혀 자동
+    // 공개되거나 상대가 공개를 선택(혹은 시간 초과로 강제 공개)한 경우 여기 추가된다.
+    // 다음 핸드가 시작되면 비워진다.
+    private final Set<String> voluntarilyRevealedIds = new HashSet<>();
+    // 이번 쇼다운이 정확히 2명(헤즈업)이 겨루는 특수 흐름을 탔는지 — 이 경우 "쇼다운에서 폴드 안 한
+    // 사람 전원 자동 공개"라는 일반 규칙이 적용되지 않고, voluntarilyRevealedIds로만 공개 여부가
+    // 결정된다. 다음 핸드가 시작되면 초기화된다.
+    private boolean headsUpShowdown;
+    // 헤즈업 쇼다운에서 공개/머크를 결정해야 하는 사람의 id. 아직 결정 전(대기 중)에만 non-null이고,
+    // 결정이 끝나면(또는 시간 초과로 강제 처리되면) null로 돌아간다 — "지금 대기 중인지" 자체를
+    // 이 값의 null 여부로 판단한다.
+    private String headsUpDeciderPlayerId;
 
     public void addPlayer(Player player) {
         if (players.size() >= MAX_PLAYERS) {
@@ -116,5 +134,33 @@ public class Room {
 
     public void setLastShowdownResult(ShowdownResult lastShowdownResult) {
         this.lastShowdownResult = lastShowdownResult;
+    }
+
+    public String getFoldWinWinnerId() {
+        return foldWinWinnerId;
+    }
+
+    public void setFoldWinWinnerId(String foldWinWinnerId) {
+        this.foldWinWinnerId = foldWinWinnerId;
+    }
+
+    public Set<String> getVoluntarilyRevealedIds() {
+        return voluntarilyRevealedIds;
+    }
+
+    public boolean isHeadsUpShowdown() {
+        return headsUpShowdown;
+    }
+
+    public void setHeadsUpShowdown(boolean headsUpShowdown) {
+        this.headsUpShowdown = headsUpShowdown;
+    }
+
+    public String getHeadsUpDeciderPlayerId() {
+        return headsUpDeciderPlayerId;
+    }
+
+    public void setHeadsUpDeciderPlayerId(String headsUpDeciderPlayerId) {
+        this.headsUpDeciderPlayerId = headsUpDeciderPlayerId;
     }
 }

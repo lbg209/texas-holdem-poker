@@ -19,6 +19,7 @@ import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.RequestBuilder;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
@@ -174,7 +175,7 @@ class RoomControllerTest {
     }
 
     @Test
-    void 리버까지_체크로_진행하면_쇼다운_족보와_승자가_응답에_담긴다() throws Exception {
+    void 리버까지_체크로_진행하면_헤즈업_공개_결정_대기_상태가_된다() throws Exception {
         String aliceId = join("Alice");
         String bobId = join("Bob");
 
@@ -187,13 +188,28 @@ class RoomControllerTest {
             gameEngine.applyAction(aliceId, PlayerAction.CHECK, 0);
         }
 
+        // 헤즈업 쇼다운은 곧바로 확정되지 않는다 — 무작위로 한 명은 자동 공개되고, 나머지 한
+        // 명(결정자)의 공개/머크 결정을 기다리는 동안은 아직 핸드가 "끝난" 상태가 아니다.
+        RoomStateResponse pending = readRoomState(get("/api/room"));
+        assertEquals(5, pending.communityCards().size());
+        assertNull(pending.currentActorId());
+        assertNull(pending.showdownHands(), "결정이 끝나기 전에는 족보 정보가 아직 없어야 한다");
+        String deciderId = pending.headsUpDeciderPlayerId();
+        assertNotNull(deciderId, "정확히 2명이 쇼다운까지 갔으니 결정자가 정해져 있어야 한다");
+        long visibleCount = List.of(aliceId, bobId).stream()
+                .filter(id -> findPlayer(pending, id).holeCards().size() == 2)
+                .count();
+        assertEquals(1, visibleCount, "무작위로 뽑힌 한 명만 먼저 자동 공개되어야 한다");
+
+        // 결정자가 공개를 선택하면 그제서야 실제로 핸드가 확정된다.
+        gameEngine.decideHeadsUpReveal(deciderId, true);
+
         RoomStateResponse state = readRoomState(get("/api/room"));
-        assertEquals(5, state.communityCards().size());
-        assertNull(state.currentActorId());
+        assertNull(state.headsUpDeciderPlayerId(), "결정이 끝났으므로 더 이상 대기 상태가 아니다");
         assertNotNull(state.showdownHands(), "쇼다운까지 갔으므로 족보 정보가 있어야 한다");
         assertEquals(2, state.showdownHands().size());
         assertTrue(state.showdownHands().stream().anyMatch(ShowdownHandView::isWinner), "승자가 최소 한 명은 있어야 한다");
-        assertEquals(2, findPlayer(state, aliceId).holeCards().size(), "실제 쇼다운이라 양쪽 다 카드가 공개된다");
+        assertEquals(2, findPlayer(state, aliceId).holeCards().size(), "공개를 선택했으므로 양쪽 다 카드가 공개된다");
         assertEquals(2, findPlayer(state, bobId).holeCards().size());
     }
 }

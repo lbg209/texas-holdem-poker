@@ -7,6 +7,7 @@ import com.lbg0146.backend.exception.GameStateException;
 import com.lbg0146.backend.exception.InvalidActionException;
 import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerAction;
+import com.lbg0146.backend.player.PlayerStatus;
 import com.lbg0146.backend.room.Phase;
 import com.lbg0146.backend.room.Room;
 import org.junit.jupiter.api.Test;
@@ -14,6 +15,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -216,5 +219,258 @@ class GameEngineTest {
         assertEquals(10_000 - 1000 + 1166, a.getChips(), "버튼은 잔돈을 가장 나중에 받는다");
         assertEquals(10_000 - 1000 + 1167, b.getChips());
         assertEquals(10_000 - 1000 + 1167, c.getChips());
+    }
+
+    @Test
+    void 예약된_라운드와_액션자가_여전히_유효하면_자동_폴드된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("p1", "P1", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p2", "P2", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 헤즈업: 첫 액션자 = p1(버튼/SB)
+
+        BettingRound roundAtScheduleTime = engine.getCurrentBettingRound();
+        boolean folded = engine.autoFoldIfStillWaitingOn(roundAtScheduleTime, "p1");
+
+        assertTrue(folded);
+        assertEquals(PlayerStatus.FOLDED, room.findPlayer("p1").getStatus());
+    }
+
+    @Test
+    void 그_사이_이미_액션했으면_자동_폴드를_무시한다() {
+        Room room = new Room();
+        room.addPlayer(new Player("p1", "P1", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p2", "P2", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+
+        BettingRound roundAtScheduleTime = engine.getCurrentBettingRound();
+        engine.applyAction("p1", PlayerAction.CALL, 0); // p1이 이미 액션함 -> 차례가 p2로 넘어감
+
+        boolean folded = engine.autoFoldIfStillWaitingOn(roundAtScheduleTime, "p1");
+
+        assertFalse(folded, "이미 액션한 사람에 대한 타이머는 무시되어야 한다");
+        assertEquals(PlayerStatus.ACTIVE, room.findPlayer("p1").getStatus());
+    }
+
+    @Test
+    void 그_사이_새_스트리트로_넘어갔으면_자동_폴드를_무시한다() {
+        Room room = new Room();
+        room.addPlayer(new Player("p1", "P1", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p2", "P2", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+
+        BettingRound preflopRound = engine.getCurrentBettingRound();
+        engine.applyAction("p1", PlayerAction.CALL, 0);
+        engine.applyAction("p2", PlayerAction.CHECK, 0); // 프리플랍 종료 -> 플랍으로 새 BettingRound 생성
+
+        boolean folded = engine.autoFoldIfStillWaitingOn(preflopRound, "p2");
+
+        assertFalse(folded, "이미 지나간 스트리트의(오래된 BettingRound 인스턴스) 타이머는 무시되어야 한다");
+    }
+
+    @Test
+    void 파산한_플레이어는_전원_레디_판정에서_제외된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 0)); // 시작부터 칩이 없음 -> 첫 핸드에서 바로 BUSTED로 전환됨
+        room.addPlayer(new Player("c", "C", 1000));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand(); // 버튼=a, SB=b는 파산이라 건너뛰고 실제로는 a/c만 참여
+        assertEquals(PlayerStatus.BUSTED, room.findPlayer("b").getStatus());
+        engine.applyAction(engine.getCurrentBettingRound().getCurrentActorId().orElseThrow(), PlayerAction.FOLD, 0);
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+
+        // b(파산)는 레디를 안 했지만, a/c만 레디하면 전원 레디로 판정되어야 한다.
+        engine.setReady("a", true);
+        engine.setReady("c", true);
+
+        assertTrue(engine.isWaitingForNextHandWithEveryoneReady());
+    }
+
+    @Test
+    void 레디하지_않은_생존_플레이어가_있으면_자동_시작_대상이_아니다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand();
+        engine.applyAction(engine.getCurrentBettingRound().getCurrentActorId().orElseThrow(), PlayerAction.FOLD, 0);
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+
+        engine.setReady("a", true); // b는 레디 안 함
+
+        assertFalse(engine.isWaitingForNextHandWithEveryoneReady());
+        assertFalse(engine.autoStartIfStillReady());
+    }
+
+    @Test
+    void 아직_한_번도_핸드를_시작한_적_없어도_전원_레디면_자동_시작_대상이다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+        // phase가 아직 null인 상태 — 첫 핸드조차 시작 전이라도 전원 레디면 자동 시작 대상이어야 한다.
+
+        engine.setReady("a", true);
+        engine.setReady("b", true);
+
+        assertTrue(engine.isWaitingForNextHandWithEveryoneReady());
+        assertTrue(engine.autoStartIfStillReady());
+        assertEquals(Phase.PREFLOP, room.getPhase());
+    }
+
+    @Test
+    void 전원_레디면_자동_시작이_실제로_새_핸드를_시작한다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand();
+        engine.applyAction(engine.getCurrentBettingRound().getCurrentActorId().orElseThrow(), PlayerAction.FOLD, 0);
+        engine.setReady("a", true);
+        engine.setReady("b", true);
+
+        boolean started = engine.autoStartIfStillReady();
+
+        assertTrue(started);
+        assertEquals(Phase.PREFLOP, room.getPhase(), "자동 시작으로 다음 핸드가 실제로 시작되어야 한다");
+    }
+
+    @Test
+    void 그_사이_레디를_취소했으면_자동_시작을_무시한다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand();
+        engine.applyAction(engine.getCurrentBettingRound().getCurrentActorId().orElseThrow(), PlayerAction.FOLD, 0);
+        engine.setReady("a", true);
+        engine.setReady("b", true);
+        engine.setReady("b", false); // 카운트다운 도중 b가 취소
+
+        assertFalse(engine.autoStartIfStillReady(), "예약 시점 이후 조건이 깨졌으면 자동 시작하면 안 된다");
+    }
+
+    @Test
+    void 폴드승_승자는_자기_카드를_자원해서_공개할_수_있다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand();
+        String winnerId = engine.getCurrentBettingRound().getCurrentActorId().orElseThrow().equals("a") ? "b" : "a";
+        engine.applyAction(engine.getCurrentBettingRound().getCurrentActorId().orElseThrow(), PlayerAction.FOLD, 0);
+
+        assertFalse(room.getVoluntarilyRevealedIds().contains(winnerId));
+        engine.revealFoldWinHand(winnerId);
+        assertTrue(room.getVoluntarilyRevealedIds().contains(winnerId));
+    }
+
+    @Test
+    void 폴드승_승자가_아니면_카드_공개가_거부된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand();
+        String actorId = engine.getCurrentBettingRound().getCurrentActorId().orElseThrow();
+        String loserId = actorId; // 지금 액션할 사람이 폴드하니, 그 사람이 패자다
+        engine.applyAction(actorId, PlayerAction.FOLD, 0);
+
+        assertThrows(GameStateException.class, () -> engine.revealFoldWinHand(loserId));
+    }
+
+    // 리버까지 체크/콜로만 진행해서 헤즈업 쇼다운(정확히 2명)에 도달시킨다.
+    private void checkHeadsUpHandToRiver(GameEngine engine, String buttonId, String otherId) {
+        engine.applyAction(buttonId, PlayerAction.CALL, 0);
+        engine.applyAction(otherId, PlayerAction.CHECK, 0);
+        for (int street = 0; street < 3; street++) {
+            engine.applyAction(otherId, PlayerAction.CHECK, 0);
+            engine.applyAction(buttonId, PlayerAction.CHECK, 0);
+        }
+    }
+
+    @Test
+    void 헤즈업_쇼다운은_결정_전까지_팟이_지급되지_않는다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a(SB), b(BB)
+
+        checkHeadsUpHandToRiver(engine, "a", "b");
+
+        assertEquals(Phase.RIVER, room.getPhase(), "헤즈업 쇼다운 결정 전까지는 phase가 아직 SHOWDOWN으로 확정되지 않는다");
+        assertNotNull(room.getHeadsUpDeciderPlayerId());
+        assertNull(room.getLastShowdownResult());
+        assertNull(engine.resolveWinnerId(), "결정 전까지는 게임 종료(우승자) 판정도 하면 안 된다");
+        // 블라인드만 걷힌 상태 그대로, 팟은 아직 지급되지 않았다.
+        assertEquals(10_000 - Room.BIG_BLIND, room.findPlayer("a").getChips());
+        assertEquals(10_000 - Room.BIG_BLIND, room.findPlayer("b").getChips());
+    }
+
+    @Test
+    void 헤즈업_쇼다운에서_머크해도_실제_승자는_칩을_받는다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+        checkHeadsUpHandToRiver(engine, "a", "b");
+
+        String deciderId = room.getHeadsUpDeciderPlayerId();
+
+        engine.decideHeadsUpReveal(deciderId, false); // 머크(공개 안 함)
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+        assertNull(room.getHeadsUpDeciderPlayerId(), "결정이 끝났으므로 더 이상 대기 상태가 아니다");
+        assertFalse(room.getVoluntarilyRevealedIds().contains(deciderId), "머크했으므로 공개 목록에 없어야 한다");
+        assertNotNull(room.getLastShowdownResult());
+        // 머크해도 팟은 정상적으로(실제 족보 비교 결과대로) 지급된다 — 시작 칩 총합(20,000)이
+        // 그대로 두 사람에게 다시 나뉘어 있어야 한다(칩이 어딘가 사라지거나 늘어나지 않았는지 확인).
+        int totalChipsAfter = room.findPlayer("a").getChips() + room.findPlayer("b").getChips();
+        assertEquals(20_000, totalChipsAfter);
+    }
+
+    @Test
+    void 결정자가_시간_초과되면_강제로_공개_처리된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+        checkHeadsUpHandToRiver(engine, "a", "b");
+
+        String deciderId = room.getHeadsUpDeciderPlayerId();
+        boolean forced = engine.forceHeadsUpRevealIfStillPending(deciderId);
+
+        assertTrue(forced);
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+        assertTrue(room.getVoluntarilyRevealedIds().contains(deciderId), "시간 초과면 강제로 공개 처리되어야 한다");
+    }
+
+    @Test
+    void 이미_결정했으면_시간_초과_강제_처리를_무시한다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+        checkHeadsUpHandToRiver(engine, "a", "b");
+
+        String deciderId = room.getHeadsUpDeciderPlayerId();
+        engine.decideHeadsUpReveal(deciderId, false);
+
+        boolean forced = engine.forceHeadsUpRevealIfStillPending(deciderId);
+
+        assertFalse(forced, "이미 결정이 끝났으면 뒤늦은 시간 초과 처리는 무시해야 한다");
     }
 }

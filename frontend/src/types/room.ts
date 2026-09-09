@@ -39,12 +39,15 @@ export interface PlayerView {
   lastAction: PlayerActionType | null;
   netChipChange: number;
   holeCards: CardView[];
+  ready: boolean;
 }
 
 export interface ShowdownHandView {
   playerId: string;
-  handRank: HandRank;
-  bestFive: CardView[];
+  // 헤즈업 쇼다운에서 이 사람이 아직 공개 전(대기 중)이거나 머크했으면 null — isWinner는 그와
+  // 무관하게 항상 실제 결과를 반영한다(카드는 안 보여도 승리 배지/칩 이동은 정상 동작해야 하므로).
+  handRank: HandRank | null;
+  bestFive: CardView[] | null;
   isWinner: boolean;
 }
 
@@ -58,6 +61,15 @@ export interface RoomStateResponse {
   minimumRaise: number | null;
   currentActorId: string | null;
   showdownHands: ShowdownHandView[] | null;
+  winnerId: string | null;
+  turnDeadlineAtMillis: number | null;
+  nextHandAtMillis: number | null;
+  foldWinWinnerId: string | null;
+  // 헤즈업 쇼다운에서 공개/머크를 결정해야 하는 사람의 id. 아직 결정 전(대기 중)에만 non-null.
+  headsUpDeciderPlayerId: string | null;
+  headsUpRevealDeadlineAtMillis: number | null;
+  // 이번 핸드에서 카드가 보이기로 확정된 사람들의 id 목록(폴드승 자원 공개 + 헤즈업 자동/자원/강제 공개).
+  revealedPlayerIds: string[];
 }
 
 export interface JoinPlayerResponse {

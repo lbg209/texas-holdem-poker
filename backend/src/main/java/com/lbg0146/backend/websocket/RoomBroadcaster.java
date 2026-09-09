@@ -21,11 +21,18 @@ public class RoomBroadcaster {
 
     private final GameEngine gameEngine;
     private final ObjectMapper objectMapper;
+    private final TurnTimerService turnTimerService;
+    private final AutoStartService autoStartService;
+    private final HeadsUpRevealTimerService headsUpRevealTimerService;
     private final Set<WebSocketSession> sessions = ConcurrentHashMap.newKeySet();
 
-    public RoomBroadcaster(GameEngine gameEngine, ObjectMapper objectMapper) {
+    public RoomBroadcaster(GameEngine gameEngine, ObjectMapper objectMapper, TurnTimerService turnTimerService,
+            AutoStartService autoStartService, HeadsUpRevealTimerService headsUpRevealTimerService) {
         this.gameEngine = gameEngine;
         this.objectMapper = objectMapper;
+        this.turnTimerService = turnTimerService;
+        this.autoStartService = autoStartService;
+        this.headsUpRevealTimerService = headsUpRevealTimerService;
     }
 
     public void register(WebSocketSession session) {
@@ -37,7 +44,13 @@ public class RoomBroadcaster {
     }
 
     // 홀카드 노출 규칙이 요청자마다 다르므로, 세션마다 각자의 playerId 기준으로 상태를 다시 계산해서 개별 전송한다.
+    // 상태가 실제로 바뀌는 지점(액션 적용/핸드 시작 등)마다 호출되므로, 턴 타이머를 다시 예약할지
+    // 판단하기에도 정확히 맞는 지점이다 — onStateBroadcast가 자체적으로 "턴이 실제로 바뀌었을 때만"
+    // 다시 예약하므로 여기서 매번 호출해도 안전하다.
     public void broadcastState() {
+        turnTimerService.onStateBroadcast(gameEngine, this::broadcastState);
+        autoStartService.onStateBroadcast(gameEngine, this::broadcastState);
+        headsUpRevealTimerService.onStateBroadcast(gameEngine, this::broadcastState);
         for (WebSocketSession session : sessions) {
             sendState(session);
         }
@@ -45,7 +58,9 @@ public class RoomBroadcaster {
 
     public void sendState(WebSocketSession session) {
         String playerId = (String) session.getAttributes().get(PLAYER_ID_ATTRIBUTE);
-        RoomStateResponse state = gameEngine.withLock(() -> RoomStateMapper.toResponse(gameEngine, playerId));
+        RoomStateResponse state = gameEngine.withLock(() -> RoomStateMapper.toResponse(gameEngine, playerId,
+                turnTimerService.getCurrentDeadlineMillis(), autoStartService.getCurrentDeadlineMillis(),
+                headsUpRevealTimerService.getCurrentDeadlineMillis()));
         send(session, new StateMessage(state));
     }
 
