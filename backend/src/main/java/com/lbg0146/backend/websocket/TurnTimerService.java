@@ -2,7 +2,6 @@ package com.lbg0146.backend.websocket;
 
 import com.lbg0146.backend.game.BettingRound;
 import com.lbg0146.backend.game.GameEngine;
-import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -16,7 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 // 전혀 모르며(autoFoldIfStillWaitingOn만 알고 있음), 이 클래스도 GameEngine 외에는 아무것도
 // 몰라서(RoomBroadcaster에 대한 의존성 없음) 순환 의존이 생기지 않는다 — 타임아웃 시 무엇을 할지는
 // onTimeout 콜백으로 호출 측(RoomBroadcaster)이 넘겨준다.
-@Component
+// Spring 빈이 아니다 — 방(RoomInstance)마다 하나씩 직접 생성해서 들고 있는다.
 public class TurnTimerService {
 
     public static final int TURN_LIMIT_SECONDS = 60;

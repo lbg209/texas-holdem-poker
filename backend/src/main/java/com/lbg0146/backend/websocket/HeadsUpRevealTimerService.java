@@ -1,7 +1,6 @@
 package com.lbg0146.backend.websocket;
 
 import com.lbg0146.backend.game.GameEngine;
-import org.springframework.stereotype.Component;
 
 import java.util.Objects;
 import java.util.concurrent.Executors;
@@ -13,7 +12,7 @@ import java.util.concurrent.atomic.AtomicReference;
 // 상태가 바뀔 때마다(RoomBroadcaster.broadcastState) 호출되어, 헤즈업 쇼다운에서 공개/머크를
 // 결정해야 하는 사람이 DECISION_TIME_LIMIT_SECONDS 안에 결정하지 않으면 자동으로(강제) 공개
 // 처리한다. TurnTimerService/AutoStartService와 동일한 구조.
-@Component
+// Spring 빈이 아니다 — 방(RoomInstance)마다 하나씩 직접 생성해서 들고 있는다.
 public class HeadsUpRevealTimerService {
 
     public static final int DECISION_TIME_LIMIT_SECONDS = 8;

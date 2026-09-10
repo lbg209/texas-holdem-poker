@@ -62,6 +62,21 @@ class GameEngineTest {
     }
 
     @Test
+    void 방_설정을_바꾸면_핸드도_그_블라인드로_진행된다() {
+        Room room = new Room();
+        GameEngine engine = new GameEngine(room);
+        engine.configureRoom(50_000, 1000, 6); // 빅블라인드 1000 -> 스몰블라인드 500
+        room.addPlayer(new Player("p1", "P1", room.getStartingChips()));
+        room.addPlayer(new Player("p2", "P2", room.getStartingChips()));
+
+        engine.startHand(); // 헤즈업: 버튼=p1(SB), BB=p2
+
+        assertEquals(500, room.getPlayers().get(0).getCurrentRoundBet());
+        assertEquals(1000, room.getPlayers().get(1).getCurrentRoundBet());
+        assertEquals(1000, engine.getCurrentBettingRound().getCurrentBet());
+    }
+
+    @Test
     void 보유_칩을_초과하는_RAISE는_거부된다() {
         Room room = new Room();
         room.addPlayer(new Player("p1", "P1", 1000));
@@ -234,6 +249,23 @@ class GameEngineTest {
 
         assertTrue(folded);
         assertEquals(PlayerStatus.FOLDED, room.findPlayer("p1").getStatus());
+        assertTrue(room.findPlayer("p1").isAutoFolded(), "타임아웃으로 인한 폴드는 autoFolded로 표시되어야 한다");
+    }
+
+    @Test
+    void 직접_폴드한_경우는_autoFolded로_표시되지_않는다() {
+        Room room = new Room();
+        room.addPlayer(new Player("p1", "P1", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p2", "P2", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p3", "P3", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+
+        String actorId = engine.getCurrentBettingRound().getCurrentActorId().orElseThrow();
+        engine.applyAction(actorId, PlayerAction.FOLD, 0);
+
+        assertEquals(PlayerStatus.FOLDED, room.findPlayer(actorId).getStatus());
+        assertFalse(room.findPlayer(actorId).isAutoFolded());
     }
 
     @Test
@@ -472,5 +504,229 @@ class GameEngineTest {
         boolean forced = engine.forceHeadsUpRevealIfStillPending(deciderId);
 
         assertFalse(forced, "이미 결정이 끝났으면 뒤늦은 시간 초과 처리는 무시해야 한다");
+    }
+
+    @Test
+    void 완전한_유휴_상태면_나가기_요청이_즉시_처리된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room); // 아직 핸드를 한 번도 시작한 적 없음(phase == null)
+
+        engine.requestLeave("a", true);
+
+        assertEquals(1, room.getPlayers().size());
+        assertThrows(IllegalArgumentException.class, () -> room.findPlayer("a"));
+    }
+
+    // 실사용 중 발견된 버그의 회귀 테스트: 쇼다운 공개 애니메이션이 재생되는 도중(백엔드 기준으로는
+    // 이미 phase == SHOWDOWN) 나가기를 눌러도, 예전에는 "핸드 진행 중이 아니다 = 즉시 제거"로
+    // 취급되어 결과 화면을 볼 틈도 없이 바로 튕겨나갔다. 이제는 SHOWDOWN 상태에서는 항상 유예를 둔다.
+    @Test
+    void 핸드가_끝난_직후_SHOWDOWN_상태에서_나가기를_눌러도_즉시_제거되지_않는다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+        engine.applyAction("a", PlayerAction.FOLD, 0); // b 혼자 남아 폴드승, 핸드 종료(phase == SHOWDOWN)
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+
+        engine.requestLeave("a", true); // 핸드가 끝난 뒤에(쇼다운 공개 중에) 나가기를 누름
+
+        assertEquals(2, room.getPlayers().size(), "SHOWDOWN 상태라도 즉시 제거하지 않고 유예를 둬야 한다");
+        assertTrue(engine.hasPendingLeaveDuringShowdown());
+
+        engine.processPendingLeaves();
+
+        assertEquals(1, room.getPlayers().size());
+    }
+
+    @Test
+    void 나가기를_누르면_레디가_자동으로_꺼진다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        room.addPlayer(new Player("c", "C", 1000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+        room.findPlayer("a").setReady(true);
+
+        engine.requestLeave("a", true);
+
+        assertFalse(room.findPlayer("a").isReady(), "나가기를 누르면 자동 시작 방지를 위해 레디가 꺼져야 한다");
+    }
+
+    @Test
+    void 핸드_진행_중_나가기_요청은_핸드가_끝나도_3초_유예_후에_처리된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        room.addPlayer(new Player("c", "C", 1000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a, SB=b, BB=c, 프리플랍 첫 액션=a(UTG)
+
+        engine.requestLeave("a", true);
+        assertEquals(3, room.getPlayers().size(), "핸드 진행 중이므로 아직 제거되면 안 된다");
+
+        engine.applyAction("a", PlayerAction.FOLD, 0);
+        engine.applyAction("b", PlayerAction.FOLD, 0); // c 혼자 남아 폴드승
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+        assertEquals(3, room.getPlayers().size(),
+                "핸드가 막 끝났어도 결과를 볼 시간을 줘야 하므로 즉시 제거되면 안 된다");
+        assertTrue(engine.hasPendingLeaveDuringShowdown(), "LeaveProcessingTimerService가 3초 뒤 처리할 대상이 있어야 한다");
+
+        engine.processPendingLeaves(); // 3초 타이머가 만료된 상황을 흉내낸다.
+
+        assertEquals(2, room.getPlayers().size(), "유예 시간이 지났으니 나가기 예약된 a가 제거되어야 한다");
+        assertThrows(IllegalArgumentException.class, () -> room.findPlayer("a"));
+        assertFalse(engine.hasPendingLeaveDuringShowdown());
+    }
+
+    @Test
+    void 삼인_이상_쇼다운으로_핸드가_끝나도_나가기_예약된_사람이_유예_후_제거된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        room.addPlayer(new Player("c", "C", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a, SB=b, BB=c
+
+        engine.requestLeave("b", true);
+
+        engine.applyAction("a", PlayerAction.CALL, 0);
+        engine.applyAction("b", PlayerAction.CALL, 0);
+        engine.applyAction("c", PlayerAction.CHECK, 0);
+        for (int street = 0; street < 3; street++) {
+            engine.applyAction("b", PlayerAction.CHECK, 0);
+            engine.applyAction("c", PlayerAction.CHECK, 0);
+            engine.applyAction("a", PlayerAction.CHECK, 0);
+        }
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+        assertEquals(3, room.getPlayers().size(), "쇼다운 공개를 볼 시간을 줘야 하므로 즉시 제거되면 안 된다");
+
+        engine.processPendingLeaves();
+
+        assertEquals(2, room.getPlayers().size());
+        assertThrows(IllegalArgumentException.class, () -> room.findPlayer("b"));
+    }
+
+    @Test
+    void 나가기를_취소하면_핸드가_끝나도_제거되지_않는다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("c", "C", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+
+        engine.requestLeave("a", true);
+        engine.requestLeave("a", false); // 취소
+
+        engine.applyAction("a", PlayerAction.FOLD, 0);
+        engine.applyAction("b", PlayerAction.FOLD, 0);
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+        assertEquals(3, room.getPlayers().size(), "나가기를 취소했으므로 핸드가 끝나도 남아있어야 한다");
+        assertFalse(room.findPlayer("a").isLeaving());
+    }
+
+    @Test
+    void GAME_OVER_상태가_아니면_초기화_요청은_무시된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+
+        boolean reset = engine.resetAfterGameOverIfStillOver();
+
+        assertFalse(reset);
+        assertEquals(2, room.getPlayers().size());
+    }
+
+    // GAME OVER는 이제 핸드가 실제로 끝나는 시점(checkGameOver)에만 판정되어 고정된다 — 그래서
+    // 테스트도 direct Room 구성이 아니라 실제 핸드(폴드승)를 끝까지 진행시켜야 한다. b의 칩을
+    // resetChips(0)으로 미리 바닥냈다가(실제로는 올인 패배로 도달하는 상황을 단순화한 것) 폴드로
+    // 핸드를 끝내면, finishHandByFold 안에서 checkGameOver가 이를 감지한다.
+    private void playHandUntilBFoldsAndBusts(GameEngine engine, Player b) {
+        engine.startHand(); // 헤즈업: 버튼=a(SB), 첫 액션=a
+        b.resetChips(0);
+        engine.applyAction("a", PlayerAction.CALL, 0);
+        engine.applyAction("b", PlayerAction.FOLD, 0);
+    }
+
+    @Test
+    void GAME_OVER_상태면_내보내지_않고_전원_칩과_레디가_초기화된다() {
+        Room room = new Room();
+        Player a = new Player("a", "A", 10_000);
+        Player b = new Player("b", "B", 10_000);
+        room.addPlayer(a);
+        room.addPlayer(b);
+        GameEngine engine = new GameEngine(room);
+        playHandUntilBFoldsAndBusts(engine, b);
+        a.setReady(true);
+
+        assertEquals("a", engine.resolveWinnerId());
+
+        boolean reset = engine.resetAfterGameOverIfStillOver();
+
+        assertTrue(reset);
+        assertEquals(2, room.getPlayers().size(), "내보내지 않고 그대로 남아있어야 한다");
+        assertEquals(Room.STARTING_CHIPS, a.getChips());
+        assertEquals(Room.STARTING_CHIPS, b.getChips());
+        assertEquals(PlayerStatus.ACTIVE, b.getStatus(), "파산했던 사람도 칩을 받아 다시 ACTIVE여야 한다");
+        assertFalse(a.isReady(), "리매치를 기다리려면 다시 레디해야 한다 — 이전 레디는 유지되면 안 된다");
+        assertNull(room.getPhase());
+        assertEquals(-1, room.getDealerButtonPosition());
+        assertNull(engine.resolveWinnerId(), "리셋했으니 더 이상 GAME OVER가 아니다");
+    }
+
+    // 실사용 중 발견된 버그의 회귀 테스트: GAME OVER 카운트다운 도중 한 명이 "나가기"로 방을 빠져서
+    // 인원이 MIN_PLAYERS 밑으로 줄어도, 이미 확정된 GAME OVER 판정 자체는 흔들리면 안 된다
+    // (그 전엔 resolveWinnerId를 매번 다시 계산해서, 인원이 줄면 null이 되어 카운트다운이 멋대로
+    // 취소되고, 다시 들어오면 처음부터 다시 시작되는 버그가 있었다).
+    @Test
+    void GAME_OVER_이후_한_명이_나가서_인원이_줄어도_판정은_유지된다() {
+        Room room = new Room();
+        Player a = new Player("a", "A", 10_000);
+        Player b = new Player("b", "B", 10_000);
+        room.addPlayer(a);
+        room.addPlayer(b);
+        GameEngine engine = new GameEngine(room);
+        playHandUntilBFoldsAndBusts(engine, b);
+
+        assertEquals("a", engine.resolveWinnerId());
+
+        engine.requestLeave("b", true); // b가 나가기를 예약한다(핸드가 끝난 직후라 3초 유예 대상).
+        engine.processPendingLeaves(); // 유예 시간이 지난 상황을 흉내낸다 -> 인원이 1명으로 줄어든다.
+
+        assertEquals(1, room.getPlayers().size());
+        assertEquals("a", engine.resolveWinnerId(), "인원이 줄어도 GAME OVER 판정은 그대로 유지되어야 한다");
+    }
+
+    // 실사용 중 발견된 버그의 회귀 테스트: GAME OVER 카운트다운 도중 승자 본인이 "나가기"로 방을
+    // 빠지면, players 목록에서 다시 닉네임을 찾을 수 없게 된다 — 그래서 닉네임 자체도 고정값으로
+    // 따로 들고 있어야 한다.
+    @Test
+    void GAME_OVER_이후_승자가_나가도_닉네임_판정은_유지된다() {
+        Room room = new Room();
+        Player a = new Player("a", "A닉네임", 10_000);
+        Player b = new Player("b", "B", 10_000);
+        room.addPlayer(a);
+        room.addPlayer(b);
+        GameEngine engine = new GameEngine(room);
+        playHandUntilBFoldsAndBusts(engine, b);
+
+        assertEquals("A닉네임", engine.resolveWinnerNickname());
+
+        engine.requestLeave("a", true); // 승자 본인이 나가기를 예약해도(패자 b는 여전히 자리에 남아있음)
+        engine.processPendingLeaves(); // 유예 시간이 지난 상황을 흉내낸다.
+
+        assertEquals(1, room.getPlayers().size());
+        assertEquals("a", engine.resolveWinnerId(), "승자 id 판정은 유지되어야 한다");
+        assertEquals("A닉네임", engine.resolveWinnerNickname(), "승자가 나가도 닉네임은 고정값으로 유지되어야 한다");
     }
 }

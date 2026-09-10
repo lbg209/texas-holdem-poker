@@ -27,7 +27,7 @@ public class RoomStateMapper {
     }
 
     public static RoomStateResponse toResponse(GameEngine engine, String requestingPlayerId, Long turnDeadlineAtMillis,
-            Long nextHandAtMillis, Long headsUpRevealDeadlineAtMillis) {
+            Long nextHandAtMillis, Long headsUpRevealDeadlineAtMillis, Long gameOverResetAtMillis) {
         Room room = engine.getRoom();
         BettingRound round = engine.getCurrentBettingRound();
 
@@ -55,12 +55,21 @@ public class RoomStateMapper {
                 round == null ? null : round.getCurrentActorId().orElse(null),
                 toShowdownHands(room, requestingPlayerId),
                 engine.resolveWinnerId(),
+                engine.resolveWinnerNickname(),
                 turnDeadlineAtMillis,
                 nextHandAtMillis,
                 room.getFoldWinWinnerId(),
                 room.getHeadsUpDeciderPlayerId(),
                 headsUpRevealDeadlineAtMillis,
-                List.copyOf(room.getVoluntarilyRevealedIds())
+                List.copyOf(room.getVoluntarilyRevealedIds()),
+                gameOverResetAtMillis,
+                room.getStartingChips(),
+                room.getSmallBlind(),
+                room.getBigBlind(),
+                room.getMaxPlayers(),
+                room.getRoomCode(),
+                room.getName(),
+                room.isPrivate()
         );
     }
 
@@ -74,7 +83,11 @@ public class RoomStateMapper {
             return null;
         }
 
+        // eligible이 1명뿐인 팟(상대가 콜 못 해서 아무도 못 다투고 자기 초과 베팅을 그냥 돌려받는
+        // 경우)은 실제 카드 비교로 이긴 게 아니므로 WINNER 판정에서 제외한다. 그렇지 않으면 진짜
+        // 쇼다운(메인팟)에서 진 사람이, 자기 돈만 돌아온 사이드팟 때문에 승자로 잘못 표시된다.
         Set<String> winnerIds = result.potResults().stream()
+                .filter(potResult -> potResult.pot().eligiblePlayerIds().size() > 1)
                 .flatMap(potResult -> potResult.winners().stream())
                 .map(Player::getId)
                 .collect(Collectors.toSet());
@@ -113,6 +126,6 @@ public class RoomStateMapper {
         return new PlayerView(player.getId(), player.getNickname(), player.getChips(),
                 player.getStatus(), player.getCurrentRoundBet(), player.getTotalHandContribution(),
                 player.getLastAction(), player.getChips() - player.getChipsAtHandStart(), holeCards,
-                player.isReady());
+                player.isReady(), player.isAutoFolded(), player.isLeaving());
     }
 }

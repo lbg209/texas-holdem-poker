@@ -1,7 +1,6 @@
 package com.lbg0146.backend.websocket;
 
 import com.lbg0146.backend.game.GameEngine;
-import org.springframework.stereotype.Component;
 
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -15,7 +14,7 @@ import java.util.concurrent.atomic.AtomicReference;
 // 방금 끝난 결과(칩 이동/족보 등)를 확인할 시간을 주기 위해 더 길게 기다린다.
 // TurnTimerService와 동일한 구조 — GameEngine은 스케줄러의 존재를 모르고, 이 클래스도 GameEngine
 // 외에는 아무것도 몰라서 순환 의존이 생기지 않는다.
-@Component
+// Spring 빈이 아니다 — 방(RoomInstance)마다 하나씩 직접 생성해서 들고 있는다.
 public class AutoStartService {
 
     public static final int FIRST_HAND_DELAY_SECONDS = 1;

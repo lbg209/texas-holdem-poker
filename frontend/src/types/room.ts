@@ -40,6 +40,9 @@ export interface PlayerView {
   netChipChange: number;
   holeCards: CardView[];
   ready: boolean;
+  autoFolded: boolean;
+  // "나가기"를 예약했는지 — true면 핸드가 끝나는 즉시(또는 핸드 진행 중이 아니면 바로) 방에서 제거된다.
+  leaving: boolean;
 }
 
 export interface ShowdownHandView {
@@ -62,6 +65,8 @@ export interface RoomStateResponse {
   currentActorId: string | null;
   showdownHands: ShowdownHandView[] | null;
   winnerId: string | null;
+  // winnerId와 같은 시점에 고정된 닉네임 — 승자가 GAME OVER 카운트다운 도중 나가도 정확히 표시된다.
+  winnerNickname: string | null;
   turnDeadlineAtMillis: number | null;
   nextHandAtMillis: number | null;
   foldWinWinnerId: string | null;
@@ -70,10 +75,35 @@ export interface RoomStateResponse {
   headsUpRevealDeadlineAtMillis: number | null;
   // 이번 핸드에서 카드가 보이기로 확정된 사람들의 id 목록(폴드승 자원 공개 + 헤즈업 자동/자원/강제 공개).
   revealedPlayerIds: string[];
+  // GAME OVER(winnerId non-null) 상태에서 방이 자동으로 초기화되는 시각. GAME OVER가 아니면 null.
+  gameOverResetAtMillis: number | null;
+  // 이번 방의 설정값. 방이 비어있을 때 "방 만들기"로 바꿀 수 있고, 그 전까지는 서버 기본값이다.
+  startingChips: number;
+  smallBlind: number;
+  bigBlind: number;
+  maxPlayers: number;
+  // 방 정체성(로비/좌측 정보 패널 표시용).
+  roomCode: string;
+  name: string;
+  isPrivate: boolean;
 }
 
 export interface JoinPlayerResponse {
   playerId: string;
+}
+
+export interface CreateRoomResponse {
+  roomCode: string;
+}
+
+// 로비의 방 목록 한 줄에 대응한다. 비공개방은 이 목록 자체에 나타나지 않는다(백엔드가 걸러서 내려줌).
+export interface RoomSummaryView {
+  roomCode: string;
+  name: string;
+  isPrivate: boolean;
+  playerCount: number;
+  maxPlayers: number;
+  inProgress: boolean;
 }
 
 export interface ErrorResponse {

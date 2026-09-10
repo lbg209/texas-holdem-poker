@@ -38,6 +38,11 @@ public class GameEngine {
         room.addPlayer(player);
     }
 
+    // 방 설정(시작 칩/빅블라인드/최대 인원)을 바꾼다. 방이 비어있을 때만 허용된다(Room.configure 참고).
+    public synchronized void configureRoom(int startingChips, int bigBlind, int maxPlayers) {
+        room.configure(startingChips, bigBlind, maxPlayers);
+    }
+
     // Room/BettingRound 상태를 읽기만 하는 외부 코드(REST 상태 조회, WS 브로드캐스트 등)가
     // 진행 중인 쓰기와 겹치지 않도록 같은 락을 태워서 실행한다.
     public synchronized <T> T withLock(Supplier<T> action) {
@@ -77,14 +82,14 @@ public class GameEngine {
 
         room.setPhase(Phase.PREFLOP);
         int preflopStartOffset = headsUp ? 0 : 3; // 버튼(0)->SB(1)->BB(2)->UTG(3)
-        startNewBettingRound(preflopStartOffset, Room.BIG_BLIND, Room.BIG_BLIND);
+        startNewBettingRound(preflopStartOffset, room.getBigBlind(), room.getBigBlind());
     }
 
     private void postBlinds(boolean headsUp) {
         Player smallBlindPlayer = playerAtOffset(headsUp ? 0 : 1);
         Player bigBlindPlayer = playerAtOffset(headsUp ? 1 : 2);
-        smallBlindPlayer.commitChips(Room.SMALL_BLIND);
-        bigBlindPlayer.commitChips(Room.BIG_BLIND);
+        smallBlindPlayer.commitChips(room.getSmallBlind());
+        bigBlindPlayer.commitChips(room.getBigBlind());
     }
 
     private void dealHoleCards() {
@@ -165,6 +170,7 @@ public class GameEngine {
             return false;
         }
         applyAction(expectedPlayerId, PlayerAction.FOLD, 0);
+        room.findPlayer(expectedPlayerId).markAutoFolded();
         return true;
     }
 
@@ -201,6 +207,10 @@ public class GameEngine {
         // 그대로 두면 조회 응답에 이미 끝난 핸드의 currentActorId/currentBet이 남아,
         // 그 사람 화면에 "아직 내 차례"인 것처럼 액션 버튼이 계속 보이게 된다.
         currentBettingRound = null;
+        // 나가기 예약된 사람은 여기서 바로 빼지 않는다 — LeaveProcessingTimerService가 결과를 볼 시간
+        // (3초)을 준 뒤에 처리한다. 미리 나가기를 눌러둔 채로 쇼다운 공개 중이었으면 결과 화면도
+        // 못 보고 바로 튕겨나가던 버그가 있었다.
+        checkGameOver();
     }
 
     private void advancePhase() {
@@ -233,7 +243,7 @@ public class GameEngine {
             advancePhase();
         } else {
             // 플랍 이후에는 버튼 다음 첫 활성 플레이어부터 시작한다.
-            startNewBettingRound(1, 0, Room.BIG_BLIND);
+            startNewBettingRound(1, 0, room.getBigBlind());
         }
     }
 
@@ -270,6 +280,7 @@ public class GameEngine {
 
         room.setLastShowdownResult(resolveShowdown());
         room.setPhase(Phase.SHOWDOWN);
+        checkGameOver();
     }
 
     // 홀카드+커뮤니티 카드로 족보를 평가하고 팟별 승자를 정하기만 한다 — 칩 지급은 하지 않는다
@@ -361,29 +372,92 @@ public class GameEngine {
         room.setPhase(Phase.SHOWDOWN);
         room.setHeadsUpDeciderPlayerId(null);
         pendingHeadsUpShowdownResult = null;
+        checkGameOver();
     }
 
-    // 생존(칩 보유) 플레이어가 정확히 1명일 때 그 id를, 아니면 null을 반환한다. 핸드가 완전히
-    // 종료된 시점(진행 중인 베팅 라운드 없이 칩 정산까지 끝남)에만 판단한다 — 핸드 도중 올인으로
-    // 일시적으로 chips=0인 플레이어가 있어도 섣불리 게임 종료로 오판하지 않기 위함. 좌석에
-    // MIN_PLAYERS도 안 찼으면(아직 대결이 시작조차 안 함) 판단하지 않는다. RoomStateMapper(API
-    // 응답 노출)와 isWaitingForNextHandWithEveryoneReady(자동 시작 판단)가 공유하는 단일 소스다.
-    public synchronized String resolveWinnerId() {
+    // 핸드가 실제로 끝나는 시점(finishHandByFold/beginShowdown/finalizeHeadsUpShowdown)에 호출된다.
+    // 나가기 예약된 사람은 아직 방에 남아있는 채로(제거는 LeaveProcessingTimerService가 3초 뒤에
+    // 처리) 판단하되, 칩을 가진 사람이 정확히 1명이면 GAME OVER를 방에 "고정"시킨다. MIN_PLAYERS
+    // 미만이면(예: 파산이 아니라 그냥 나가기로 빠져서 혼자 남은 경우) 오판을 막기 위해 판단하지 않는다.
+    private void checkGameOver() {
         if (room.getPlayers().size() < Room.MIN_PLAYERS) {
-            return null;
-        }
-        boolean handConcluded = room.getPhase() == null || room.getPhase() == Phase.SHOWDOWN;
-        if (!handConcluded) {
-            return null;
+            return;
         }
         List<Player> withChips = room.getPlayers().stream()
                 .filter(p -> p.getChips() > 0)
                 .toList();
-        return withChips.size() == 1 ? withChips.get(0).getId() : null;
+        if (withChips.size() == 1) {
+            Player winner = withChips.get(0);
+            room.setGameOverWinnerId(winner.getId());
+            room.setGameOverWinnerNickname(winner.getNickname());
+        }
+    }
+
+    // GAME OVER(생존자 1명) 여부를 나타내는 고정값을 반환한다. checkGameOver()가 핸드 종료 시점에
+    // 이 값을 세팅하고, resetForRematch()가(15초 카운트다운 만료 시) 다시 비운다 — "지금 이 순간
+    // 인원이 몇 명인지"로 매번 다시 계산하지 않는다. 예전엔 매번 다시 계산했는데, GAME OVER 이후
+    // 누군가 나가서 인원이 MIN_PLAYERS 밑으로 줄어드는 순간 판정이 null로 흔들려 카운트다운이
+    // 취소돼버리는 버그가 있었다. RoomStateMapper(API 응답 노출)와
+    // isWaitingForNextHandWithEveryoneReady(자동 시작 판단)가 공유하는 단일 소스다.
+    public synchronized String resolveWinnerId() {
+        return room.getGameOverWinnerId();
+    }
+
+    // resolveWinnerId()와 같은 시점에 고정된 닉네임. 승자가 카운트다운 도중 "나가기"로 방을 빠져도
+    // players 목록에서 다시 찾을 필요 없이 그대로 정확한 닉네임을 보여줄 수 있다.
+    public synchronized String resolveWinnerNickname() {
+        return room.getGameOverWinnerNickname();
+    }
+
+    // GAME OVER 15초 타이머가 만료됐을 때 호출된다. 예약 시점에도 여전히 GAME OVER 상태일 때만
+    // 전원 칩을 리필하고 레디를 초기화한다(리매치 대기 상태로 전환) — 다른 스케줄러들과 같은
+    // "확인 후 실행" 원자적 패턴.
+    public synchronized boolean resetAfterGameOverIfStillOver() {
+        if (resolveWinnerId() == null) {
+            return false;
+        }
+        room.resetForRematch();
+        return true;
     }
 
     public synchronized void setReady(String playerId, boolean ready) {
         room.findPlayer(playerId).setReady(ready);
+    }
+
+    // "나가기"를 예약(leaving=true)하거나 취소(leaving=false)한다.
+    // - 완전한 유휴 상태(phase==null, 아직 첫 핸드 전이거나 GAME OVER 리셋 직후 — 보여줄 결과가
+    //   없음)면 즉시 방에서 제거한다.
+    // - 핸드가 진행 중이면 이번 핸드가 끝날 때까지(phase가 SHOWDOWN이 될 때까지) 아무것도 안 하고
+    //   기다린다.
+    // - 핸드가 막 끝났거나(phase==SHOWDOWN) 이미 끝나서 다음 핸드를 기다리는 중이면, 결과를 볼
+    //   시간을 주기 위해 즉시 제거하지 않고 LeaveProcessingTimerService가 3초 뒤에 처리하게
+    //   맡긴다 — 미리 나가기를 눌러둔 채로 쇼다운 공개 중이었으면 결과 화면도 못 보고 바로
+    //   튕겨나가던 버그가 있었다.
+    // 나가기를 누르면 레디도 자동으로 꺼서(STOP), 나가려는 사람이 남아있는 동안 실수로 다음 핸드가
+    // 자동 시작되는 걸 막는다.
+    public synchronized void requestLeave(String playerId, boolean leaving) {
+        Player player = room.findPlayer(playerId);
+        player.setLeaving(leaving);
+        if (leaving) {
+            player.setReady(false);
+        }
+        if (leaving && room.getPhase() == null) {
+            room.removeLeavingPlayers();
+        }
+    }
+
+    // 핸드가 막 끝났거나(또는 다음 핸드를 기다리는 중이거나) 상관없이 phase가 SHOWDOWN이고, 나가기
+    // 예약된 사람이 아직 방에 남아있는지. LeaveProcessingTimerService가 이 조건이 바뀔 때만
+    // 다시 스케줄링하는 데 쓴다.
+    public synchronized boolean hasPendingLeaveDuringShowdown() {
+        return room.getPhase() == Phase.SHOWDOWN && room.getPlayers().stream().anyMatch(Player::isLeaving);
+    }
+
+    // LeaveProcessingTimerService의 3초 타이머가 만료됐을 때 호출된다. removeLeavingPlayers() 자체가
+    // 나가기 예약된 사람이 없으면 아무 일도 안 하므로(취소됐거나 이미 처리됐거나) 별도의 재검증
+    // 없이 그냥 호출한다.
+    public synchronized void processPendingLeaves() {
+        room.removeLeavingPlayers();
     }
 
     // 핸드가 진행 중이지 않은(아직 첫 핸드를 시작 전이거나, 직전 핸드가 끝나 다음 핸드를
