@@ -1,52 +1,69 @@
-import type { CardView } from '../../types/room';
+import type { CardView, HandRank } from '../../types/room';
 import { Card } from '../table/Card';
+import { getHandRankTextClassName, getHandRankTextPrefix, getHighlightColorForHandRank } from '../../lib/handRank';
 
 interface RulesPageProps {
   onBack: () => void;
 }
 
+// 카드 랭크/무늬 기호("A♠" 등)를 백엔드 enum 이름(ACE/SPADE 등)으로 바꾼다 — Card 컴포넌트는
+// CardView.rank/suit가 실제 enum 이름일 거라고 가정하고 SVG 심볼 id를 찾으므로, 기호 문자열을
+// 그대로 넣으면(예전 버그) 매칭되는 심볼이 없어서 카드 그림이 아예 안 그려진다.
+const RANK_SYMBOL_TO_ENUM: Record<string, string> = {
+  A: 'ACE', K: 'KING', Q: 'QUEEN', J: 'JACK',
+  '10': 'TEN', '9': 'NINE', '8': 'EIGHT', '7': 'SEVEN',
+  '6': 'SIX', '5': 'FIVE', '4': 'FOUR', '3': 'THREE', '2': 'TWO',
+};
+
+const SUIT_SYMBOL_TO_ENUM: Record<string, string> = {
+  '♠': 'SPADE', '♥': 'HEART', '♦': 'DIAMOND', '♣': 'CLUB',
+};
+
 function cards(...display: string[]): CardView[] {
-  return display.map((d) => ({
-    suit: d.includes('♥') || d.includes('♦') ? 'HEART' : 'SPADE',
-    rank: d,
-    display: d,
-  }));
+  return display.map((d) => {
+    const suitSymbol = d.slice(-1);
+    const rankSymbol = d.slice(0, -1);
+    return { suit: SUIT_SYMBOL_TO_ENUM[suitSymbol], rank: RANK_SYMBOL_TO_ENUM[rankSymbol], display: d };
+  });
 }
 
 interface HandRankExample {
   label: string;
+  handRank: HandRank;
   example: CardView[];
-  // 족보를 실제로 구성하는 카드 인덱스(금색 강조). 투페어는 두 번째 페어를 별도(blue)로 강조한다.
-  goldIndices: number[];
+  // 족보를 실제로 구성하는 카드 인덱스(강조 대상 — 색상은 handRank로 자동 결정돼 실제 게임과 항상
+  // 같은 등급 체계를 쓴다). 투페어는 두 번째 페어만 별도(blue)로 강조해 구분을 보여준다
+  // (blue는 실제 게임에서는 안 쓰이고 여기서만 교육용으로 쓴다 — lib/handRank.ts 참고).
+  highlightIndices: number[];
   blueIndices?: number[];
-  special?: boolean; // 스트레이트플러시/로열플러시 — 더 화려하게
 }
 
 const HAND_RANKS: HandRankExample[] = [
-  { label: '하이카드', example: cards('A♠', 'K♥', '9♦', '5♣', '2♠'), goldIndices: [0] },
-  { label: '원페어', example: cards('K♠', 'K♥', '9♦', '5♣', '2♠'), goldIndices: [0, 1] },
+  { label: '하이카드', handRank: 'HIGH_CARD', example: cards('A♠', 'K♥', '9♦', '5♣', '2♠'), highlightIndices: [0] },
+  { label: '원페어', handRank: 'ONE_PAIR', example: cards('K♠', 'K♥', '9♦', '5♣', '2♠'), highlightIndices: [0, 1] },
   {
     label: '투페어',
+    handRank: 'TWO_PAIR',
     example: cards('K♠', 'K♥', '9♦', '9♣', '2♠'),
-    goldIndices: [0, 1],
+    highlightIndices: [0, 1],
     blueIndices: [2, 3],
   },
-  { label: '트리플', example: cards('K♠', 'K♥', 'K♦', '5♣', '2♠'), goldIndices: [0, 1, 2] },
-  { label: '스트레이트', example: cards('9♠', '8♥', '7♦', '6♣', '5♠'), goldIndices: [0, 1, 2, 3, 4] },
-  { label: '플러시', example: cards('A♠', 'J♠', '9♠', '5♠', '2♠'), goldIndices: [0, 1, 2, 3, 4] },
-  { label: '풀하우스', example: cards('K♠', 'K♥', 'K♦', '5♣', '5♠'), goldIndices: [0, 1, 2, 3, 4] },
-  { label: '포카드', example: cards('K♠', 'K♥', 'K♦', 'K♣', '5♠'), goldIndices: [0, 1, 2, 3] },
+  { label: '트리플', handRank: 'THREE_OF_A_KIND', example: cards('K♠', 'K♥', 'K♦', '5♣', '2♠'), highlightIndices: [0, 1, 2] },
+  { label: '스트레이트', handRank: 'STRAIGHT', example: cards('9♠', '8♥', '7♦', '6♣', '5♠'), highlightIndices: [0, 1, 2, 3, 4] },
+  { label: '플러시', handRank: 'FLUSH', example: cards('A♠', 'J♠', '9♠', '5♠', '2♠'), highlightIndices: [0, 1, 2, 3, 4] },
+  { label: '풀하우스', handRank: 'FULL_HOUSE', example: cards('K♠', 'K♥', 'K♦', '5♣', '5♠'), highlightIndices: [0, 1, 2, 3, 4] },
+  { label: '포카드', handRank: 'FOUR_OF_A_KIND', example: cards('K♠', 'K♥', 'K♦', 'K♣', '5♠'), highlightIndices: [0, 1, 2, 3] },
   {
     label: '스트레이트 플러시',
+    handRank: 'STRAIGHT_FLUSH',
     example: cards('9♠', '8♠', '7♠', '6♠', '5♠'),
-    goldIndices: [0, 1, 2, 3, 4],
-    special: true,
+    highlightIndices: [0, 1, 2, 3, 4],
   },
   {
     label: '로열 플러시',
+    handRank: 'STRAIGHT_FLUSH',
     example: cards('A♠', 'K♠', 'Q♠', 'J♠', '10♠'),
-    goldIndices: [0, 1, 2, 3, 4],
-    special: true,
+    highlightIndices: [0, 1, 2, 3, 4],
   },
 ];
 
@@ -72,35 +89,41 @@ export function RulesPage({ onBack }: RulesPageProps) {
       <section>
         <h2 className="mb-3 text-lg font-medium text-emerald-400">족보 순위 (낮음 → 높음)</h2>
         <div className="space-y-2">
-          {HAND_RANKS.map(({ label, example, goldIndices, blueIndices, special }) => (
-            <div
-              key={label}
-              className={`flex items-center gap-3 rounded p-2 ${
-                special ? 'bg-gradient-to-r from-fuchsia-950/50 via-slate-900/60 to-yellow-950/50' : 'bg-slate-900/60'
-              }`}
-            >
-              <span className={`w-28 shrink-0 text-sm font-medium ${special ? 'text-yellow-300' : 'text-slate-100'}`}>
-                {special && '✨ '}
-                {label}
-              </span>
-              <div className="flex gap-1">
-                {example.map((card, i) => {
-                  const isGold = goldIndices.includes(i);
-                  const isBlue = blueIndices?.includes(i) ?? false;
-                  return (
-                    <div key={i} className="origin-left scale-75">
-                      <Card
-                        card={card}
-                        face="up"
-                        highlighted={isGold || isBlue}
-                        highlightColor={special ? 'special' : isBlue ? 'blue' : 'gold'}
-                      />
-                    </div>
-                  );
-                })}
+          {HAND_RANKS.map(({ label, handRank, example, highlightIndices, blueIndices }) => {
+            // 실제 게임과 완전히 같은 소스(lib/handRank.ts)로 색상/텍스트 스타일을 정하므로,
+            // 나중에 등급 체계가 또 바뀌어도 이 페이지가 따로 낡을 일이 없다.
+            const color = getHighlightColorForHandRank(handRank, example);
+            const isFancyRow = color === 'special' || color === 'royal';
+            return (
+              <div
+                key={label}
+                className={`flex items-center gap-3 rounded p-2 ${
+                  isFancyRow ? 'bg-gradient-to-r from-fuchsia-950/50 via-slate-900/60 to-yellow-950/50' : 'bg-slate-900/60'
+                }`}
+              >
+                <span className={`w-28 shrink-0 text-sm ${getHandRankTextClassName(color)}`}>
+                  {getHandRankTextPrefix(color)}
+                  {label}
+                </span>
+                <div className="flex gap-1">
+                  {example.map((card, i) => {
+                    const isHighlighted = highlightIndices.includes(i);
+                    const isBlue = blueIndices?.includes(i) ?? false;
+                    return (
+                      <div key={i} className="origin-left scale-75">
+                        <Card
+                          card={card}
+                          face="up"
+                          highlighted={isHighlighted || isBlue}
+                          highlightColor={isBlue ? 'blue' : color}
+                        />
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
 
