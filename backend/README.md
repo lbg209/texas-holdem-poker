@@ -2,7 +2,7 @@
 
 텍사스 홀덤 포커를 서버 권위(server-authoritative) 방식으로 진행하는 게임 서버. 카드 셔플/딜, 족보 판정, 베팅 라운드 진행, 사이드팟 계산, 쇼다운까지 모든 게임 규칙을 서버가 판단하고, 클라이언트는 REST/WebSocket으로 상태를 조회·조작만 한다.
 
-현재는 **단일 고정 테이블 MVP**(로비/멀티룸/로그인 없음)이다. 프론트엔드(`../frontend`)는 별도 React 클라이언트로 구현돼 있으며 자세한 내용은 [frontend/README.md](../frontend/README.md) 참고. 이 문서는 백엔드에서 지금까지 구현된 내용만 기준으로 작성한다.
+**멀티룸(로비 + 방 목록 + 방 코드 + 비공개방) + 로그인/게스트 인증**을 지원한다. 프론트엔드(`../frontend`)는 별도 React 클라이언트로 구현돼 있으며 자세한 내용은 [frontend/README.md](../frontend/README.md) 참고. 이 문서는 백엔드에서 지금까지 구현된 내용만 기준으로 작성한다.
 
 ## 기술 스택 및 개발 환경
 
@@ -11,9 +11,9 @@
 ![Gradle](https://img.shields.io/badge/Gradle-Build-02303A?logo=gradle&logoColor=white)
 ![Jackson](https://img.shields.io/badge/Jackson-3.x-000000)
 ![JUnit5](https://img.shields.io/badge/JUnit-5-25A162?logo=junit5&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-planned-lightgrey?logo=mysql&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8-4479A1?logo=mysql&logoColor=white)
 
-> Jackson 3.x부터 패키지 경로가 `com.fasterxml.jackson.*` → `tools.jackson.*`로 변경됨. MySQL/JPA 의존성은 `build.gradle`에 주석 처리만 되어 있고 아직 활성화하지 않음(모든 상태는 서버 메모리에 존재).
+> Jackson 3.x부터 패키지 경로가 `com.fasterxml.jackson.*` → `tools.jackson.*`로 변경됨. MySQL(`poker_project` 데이터베이스, `spring-boot-starter-data-jpa` + `mysql-connector-j`)은 로그인 계정(`User`) 영속화에만 쓰인다 — 게임(방/플레이어) 상태는 여전히 서버 메모리에만 존재하며 서버 재시작 시 사라진다. 로컬 DB 접속 정보는 `application-local.yaml`(gitignore)로 분리한다.
 
 ## 패키지 구조
 
@@ -22,16 +22,19 @@ com.lbg0146.backend
 ├── 🃏 card                  # 카드/덱, 셔플
 ├── ♠️ hand                  # 족보 판정 (순수 로직)
 ├── 👤 player                # 플레이어 상태/액션
-├── 🪑 room                  # 단일 테이블 상태
+├── 🔐 auth                  # 로그인 계정(User), 인증 토큰, 회원가입/로그인 API
+│   └── 🌐 controller
+│       └── dto
+├── 🪑 room                  # 방 상태 + 멀티룸 관리(RoomManager/RoomInstance)
 │   └── 🌐 controller        # REST 컨트롤러 / DTO
 │       └── dto
 ├── ♟️ game                  # 베팅 라운드 / 사이드팟 / 핸드 진행
-├── 🔌 websocket             # 실시간 연결 / 액션 프로토콜 / 브로드캐스트 / 턴·자동시작·머크 타이머
+├── 🔌 websocket             # 실시간 연결 / 액션 프로토콜 / 브로드캐스트 / 5종 타이머
 │   └── dto
 └── ⚠️ exception             # 도메인 예외 계층
 ```
 
-`card`~`game`은 Spring 의존이 없는 순수 도메인 로직, `room.controller`/`websocket`이 REST/WebSocket 연결 계층 — 역할별이 아닌 기능별(package-by-feature) 구성.
+`card`~`game`은 Spring 의존이 없는 순수 도메인 로직, `auth`/`room.controller`/`websocket`이 REST/WebSocket 연결 계층 — 역할별이 아닌 기능별(package-by-feature) 구성.
 
 ## 구현 내용
 
@@ -63,19 +66,28 @@ com.lbg0146.backend
 
 ### 4. REST API (`room.controller`)
 
-REST는 "매 순간 진행형 상태가 아닌, 요청-응답으로 충분한 동작"만 담당한다.
+REST는 "매 순간 진행형 상태가 아닌, 요청-응답으로 충분한 동작"만 담당한다. `roomCode`가 모든 게임 진행 API의 경로 파라미터로 들어가는 멀티룸 구조다(17번 참고).
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/room` | 방 상태 조회. `playerId` 쿼리 파라미터로 본인 시점(자기 홀카드만 공개) 조회, 생략 시 관전자 시점 |
-| POST | `/api/room/players` | 방 참가. 요청 바디 `{"nickname": "..."}`, 서버가 UUID `playerId`를 발급해 응답 |
-| POST | `/api/room/hands` | 새 핸드 시작. `playerId` 쿼리 파라미터를 주면 응답도 `GET /api/room`과 동일하게 그 사람 시점으로 개인화된다(안 주면 관전자 시점) |
+| GET | `/api/rooms` | 로비 방 목록(비공개방 포함, 방마다 `roomCode`/이름/공개여부/인원/진행상태) |
+| POST | `/api/rooms` | 방 생성(이름/공개여부/비밀번호/시작칩/빅블라인드/최대인원). 만든 사람을 자동으로 입장시키지는 않는다 |
+| GET | `/api/rooms/{roomCode}` | 방 상태 조회. `playerId` 쿼리 파라미터로 본인 시점 조회, 생략 시 관전자 시점 |
+| POST | `/api/rooms/{roomCode}/players` | 방 참가. `{"nickname", "authToken", "password"}` — 비공개방은 비밀번호가 맞아야 한다 |
+| POST | `/api/rooms/{roomCode}/players/by-code` | roomCode를 직접 입력해서 참가("코드로 입장") — 비밀번호를 검사하지 않는다 |
+| POST | `/api/rooms/{roomCode}/hands` | 새 핸드 시작(디버깅용 — 프론트는 레디 시스템의 자동 시작으로 대체해서 안 씀) |
+| POST | `/api/rooms/{roomCode}/ready` | 다음 핸드 자동 시작 동의 토글 |
+| POST | `/api/rooms/{roomCode}/leave` | 나가기 예약/취소 |
+| POST | `/api/rooms/{roomCode}/reveal` | 폴드승 승자의 자원 카드 공개 |
+| POST | `/api/rooms/{roomCode}/showdown-decision` | 헤즈업 쇼다운 공개/머크 결정 |
+| POST | `/api/auth/register` | 회원가입(username/password/nickname) |
+| POST | `/api/auth/login` | 로그인 → 토큰 + nickname 반환 |
 
 응답 DTO(`RoomStateResponse`)는 `Card`/`Pot` 같은 도메인 객체를 직접 노출하지 않고 `CardView`/`PotView`/`PlayerView`로 감싼다(아래 "주요 설계 결정" 참고). 예외는 `@RestControllerAdvice`(`PokerExceptionHandler`)가 도메인 예외를 HTTP 상태 코드로 변환한다.
 
 ### 5. WebSocket 연결 (`websocket`)
 
-STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록했다. 실시간으로 계속 바뀌는 게임 진행 상태(베팅 액션, 커뮤니티 카드 공개)는 WebSocket이, 그때그때 요청하는 동작(참가, 핸드 시작)은 REST가 맡는 방식으로 역할을 나눴다. 연결 시 `?playerId=<uuid>` 쿼리 파라미터로 세션과 플레이어를 연결하며, 파라미터가 없으면 관전자로 연결되고(REST의 관전자 조회와 동일한 규칙), 존재하지 않는 `playerId`가 오면 연결 자체를 거부한다.
+STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록했다. 실시간으로 계속 바뀌는 게임 진행 상태(베팅 액션, 커뮤니티 카드 공개)는 WebSocket이, 그때그때 요청하는 동작(참가, 핸드 시작)은 REST가 맡는 방식으로 역할을 나눴다. 연결 시 `?roomCode=<code>&playerId=<uuid>` 쿼리 파라미터로 세션과 방/플레이어를 연결하며, `playerId`가 없으면 관전자로 연결되고(REST의 관전자 조회와 동일한 규칙), 존재하지 않는 `roomCode`/`playerId`가 오면 연결 자체를 거부한다.
 
 ### 6. 게임 액션 메시지 프로토콜
 
@@ -98,7 +110,7 @@ STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록
 
 ### 8. 동시성 처리
 
-`Room`/`BettingRound`의 내부 컬렉션은 스레드 세이프하지 않은데, REST와 WebSocket 양쪽에서 동시에 같은 `GameEngine` 싱글톤을 건드릴 수 있다. 이를 막기 위해:
+`Room`/`BettingRound`의 내부 컬렉션은 스레드 세이프하지 않은데, REST와 WebSocket 양쪽에서 동시에 같은 방의 `GameEngine`을 건드릴 수 있다(락은 `GameEngine` 인스턴스 단위라 방마다 독립적이다 — 17번 멀티룸 참고). 이를 막기 위해:
 
 - `GameEngine`의 상태를 바꾸는 모든 진입점(`startHand`, `applyAction`, `addPlayer`)을 `synchronized`로 보호
 - 상태를 **읽기만** 하는 외부 코드(REST 상태 조회, WebSocket 브로드캐스트, 연결 시 검증)도 `GameEngine.withLock(Supplier<T>)`을 거치도록 통일해, 진행 중인 쓰기와 겹쳐 읽는 일이 없게 함
@@ -133,13 +145,31 @@ STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록
 
 실제 쇼다운(폴드 없이 카드 비교)에 도달했을 때 겨루는 인원이 정확히 2명이면, 곧바로 승자를 공개하지 않는다. 서버가 내부적으로 결과는 미리 계산해두되(`computeShowdownResult`), 무작위로 한 명은 자동 공개하고 나머지 한 명에게 공개/머크를 8초 안에 결정하게 한다(`HeadsUpRevealTimerService`, 시간 초과 시 자동 공개). **결정이 끝나야 비로소 팟이 실제로 지급되고 `phase`가 `SHOWDOWN`으로 확정된다** — 그 전까지는 12번(GAME OVER)이나 11번(자동 시작) 판정도 함께 보류된다("누가 이겼는지" 자체를 숨겨 긴장감을 주는 연출을 위해, `phase` 전환 자체를 결정 시점까지 늦춘 것). 폴드로 이긴 핸드의 승자도 같은 방식(`voluntarilyRevealedIds`)으로 다음 핸드 전까지 자기 카드를 자원 공개할 수 있다. 3명 이상이 쇼다운까지 가면 이 지연 없이 기존처럼 즉시 전원 공개한다(실제 포커의 "마지막 액션자부터 순서대로 공개/머크" 규칙까지는 아직 구현하지 않았다 — 머크가 실제로 팟을 포기시키는 규칙이라 캐주얼한 MVP엔 안 맞다고 판단해 보류함).
 
+### 14. 로그인/인증 + 게스트 모드 (`auth`)
+
+`User` 엔티티(`username` 로그인 아이디 + `passwordHash`(BCrypt) + `nickname` + `createdAt`)를 MySQL에 영속한다. **`username`(로그인 아이디)과 `nickname`(테이블에 표시되는 이름)을 의도적으로 분리**했다 — 처음엔 같은 값을 썼는데, 로그인 아이디가 한글을 못 받는 문제와 아이디가 곧 닉네임으로 노출되는 보안 문제가 겹쳐서 가입 시 한 번만 정하는 별도 `nickname` 필드로 분리했다. 로그인 토큰은 서버 메모리 `Map<token, userId>`로만 관리한다(JWT 미사용, 서버 재시작 시 전원 로그아웃) — Room/게임 상태도 어차피 재시작하면 다 날아가는 구조라 일관성이 있고, 서명 키 관리 같은 복잡도를 피할 수 있다고 판단했다. `POST /api/auth/register`, `POST /api/auth/login`(로그인 시 `nickname`도 함께 응답해, 프론트가 아이디 노출 없이 로비에 "누구로 로그인했는지" 표시할 수 있게 한다). 게스트는 계정 없이 입장 시 입력한 닉네임 뒤에 서버가 `" (Guest)"`를 자동으로 붙인다. 같은 계정이 다른 브라우저에서 동시에 같은 방에 앉는 것은 `Player.accountUserId` + `Room.addPlayer`의 중복 검사(`GameStateException`, 409)로 막는다.
+
+### 15. 방 나가기(퇴장)
+
+"나가기"는 상황에 따라 세 가지로 처리된다: **핸드 진행 중이 아니면(`phase==null`) 즉시 제거**, **핸드가 막 끝났거나(`phase==SHOWDOWN`) 다음 핸드를 기다리는 중이면 3초 유예 후 제거**(결과 화면을 볼 시간을 준다), **핸드 진행 중이면 이번 핸드가 끝날 때까지 대기**. 3초 유예는 `LeaveProcessingTimerService`(다른 스케줄러들과 동일 패턴)가 처리하며, 나가기를 누르면 레디도 자동으로 꺼져서(STOP) 나가려는 동안 실수로 다음 핸드가 자동 시작되는 걸 막는다. 딜러 버튼은 좌석 인덱스가 아니라 "버튼을 쥔 플레이어 객체"를 추적해서, 제거 후에도 버튼이 엉뚱한 좌석을 가리키지 않는다(`Room.removeLeavingPlayers`).
+
+### 16. GAME OVER 자동 리매치
+
+생존자가 1명이 되면(`GameEngine.checkGameOver()`가 핸드 종료 시점에 판정해 `Room.gameOverWinnerId`/`gameOverWinnerNickname`에 고정) 15초 뒤 **내보내지 않고 그대로 앉은 채** 전원 칩을 시작 칩으로 리필하고 레디를 초기화한다(`Room.resetForRematch()`, `GameOverResetTimerService`) — 이후 기존 레디 시스템이 그대로 재사용되어, 전원이 다시 레디해야 새 핸드가 시작된다. 판정을 매번 다시 계산하지 않고 핸드 종료 시점에 한 번만 고정하는 이유: 카운트다운 도중 누가 "나가기"로 인원이 줄어도(MIN_PLAYERS 밑으로) 판정이 흔들려 카운트다운이 취소되는 버그가 있었기 때문이다.
+
+### 17. 멀티룸 (`RoomManager` / `RoomInstance`)
+
+서버 전체에 방이 하나뿐이던 싱글톤 구조(`Room`/`GameEngine`이 Spring 빈 하나씩)를, 방마다 독립된 세트를 만드는 구조로 교체했다. **`RoomInstance`**(순수 객체, Spring 빈 아님)가 `Room` + `GameEngine` + `RoomBroadcaster` + 5개 타이머 서비스(턴/자동시작/헤즈업공개/GAME OVER리셋/나가기유예)를 한 세트로 묶는다 — 이 타이머들은 "지금 예약 중인지" 같은 상태를 인스턴스 필드로 들고 있어서 방끼리 공유하면 안 되기 때문에, `@Component` 싱글톤에서 `RoomInstance`가 직접 `new`하는 방식으로 바꿨다. **`RoomManager`**(싱글톤 빈)가 `roomCode`(6자 랜덤 영숫자, 헷갈리는 0/O·1/I 제외) → `RoomInstance` 맵을 관리하며, 방을 만들고 찾는 진입점 역할을 한다. 방에 아무도 안 남으면(즉시 나가기든 3초 유예 나가기든) `RoomBroadcaster.broadcastState()` 끝에서 자동으로 목록에서 제거된다.
+
+비공개방(`isPrivate`+`password`, 평문 저장 — 계정 비밀번호와 달리 파티룸 PIN 수준의 민감도로 판단)도 로비 목록에는 노출되고(🔒 표시는 프론트 책임), 일반 입장(`POST /api/rooms/{roomCode}/players`)만 비밀번호를 검사한다. roomCode를 직접 입력해서 들어오는 "코드로 입장"(`POST /api/rooms/{roomCode}/players/by-code`)은 비밀번호를 검사하지 않는다 — roomCode를 안다는 것 자체를 초대로 간주한 것이다(단, `GET /api/rooms` 응답 자체에 모든 방의 roomCode가 항상 포함되므로, 이건 암호학적 보호가 아니라 "실수로/장난으로 들어오는 것"만 막는 수준이라는 걸 인지하고 내린 결정이다).
+
 ## 주요 설계 결정
 
 - **기능별 패키지 구조**: controller/service/repository 같은 역할별 계층 대신 `card`/`hand`/`player`/`room`/`game`처럼 기능 단위로 나눴다. 도메인 로직(`card`~`game`)은 Spring을 참조하지 않아 순수 JUnit으로 검증할 수 있고, `room.controller`/`websocket`만 프레임워크 계층을 안다.
 - **DTO로 도메인 객체 감싸기**: `Card`/`Pot`를 API 응답에 직접 노출하지 않는다. `Card`는 Jackson이 record 필드 그대로(`suit`, `rank`)만 직렬화해 `toString()`의 "A♠" 표현이 사라지는 문제가 있었고, `Pot.eligiblePlayerIds()`는 `Set`이라 응답마다 순서가 달라질 수 있었다. `CardView`(suit/rank/display 모두 포함), `PotView`(좌석 순서로 정렬된 리스트)로 이 문제를 해결했다.
-- **`playerId`는 REST 계층의 임시 식별자**: 로그인/인증이 없는 지금 단계에서 서버가 발급하는 UUID일 뿐이고, 도메인 로직(`Room`/`GameEngine`)은 이 값이 어떻게 발급됐는지 모른다. 나중에 실제 인증이 들어와도 발급 방식만 바꾸면 되도록 설계했다.
+- **`playerId`는 계정과 별개인 좌석 식별자**: 로그인 여부와 무관하게 입장할 때마다 서버가 새로 발급하는 UUID다 — 계정(`User`)은 로그인 상태와 닉네임만 결정하고, 실제 게임 참여는 이 임시 `playerId`가 담당한다(도메인 로직인 `Room`/`GameEngine`은 이 값이 어떻게 발급됐는지 전혀 모른다). 같은 계정이 중복으로 앉는 것만 `Player.accountUserId`로 별도 검사한다(14번 참고). 이렇게 분리해둔 덕에 나중에 인증 방식이 바뀌어도 발급 방식만 바꾸면 됐다.
 - **최소한의 예외 계층**: 아래 "예외 처리" 참고.
-- **동시성은 별도 실행자(Executor)나 메시지 큐 없이 단일 락으로 처리**: 지금은 방이 하나뿐인 MVP라 `ReentrantLock`의 타임아웃/공정성 옵션이나 액터 모델 같은 복잡한 구조가 필요 없다고 판단했다. 락이 `GameEngine` 인스턴스 단위이므로, 향후 방이 여러 개로 늘어나도(방마다 별도 `GameEngine` 인스턴스) 이 설계를 바꿀 필요가 없다.
+- **동시성은 별도 실행자(Executor)나 메시지 큐 없이 방마다 하나씩의 락으로 처리**: `synchronized`가 `GameEngine` 인스턴스 단위라, 방이 여러 개로 늘어난 지금(17번 멀티룸)도 이 설계를 바꿀 필요가 없었다 — 처음 이 구조를 잡을 때부터 "락이 인스턴스 단위라 방이 늘어나도 괜찮다"고 의도했던 그대로다. `ReentrantLock`의 타임아웃/공정성 옵션이나 액터 모델 같은 복잡한 구조는 필요 없다고 판단했다.
 - **REST 응답 개인화를 모든 진입점에 일관되게 적용**: 처음엔 `POST /api/room/hands`가 `playerId` 없이 관전자 시점으로만 응답해서, 그 즉시 이어지는 WebSocket 브로드캐스트(개인화됨)와 경쟁하며 순간적으로 본인 홀카드가 안 보이는 버그가 있었다. `GET /api/room`과 동일하게 `playerId` 쿼리 파라미터를 받아 개인화하는 것으로 통일해 해결했다 — REST 엔드포인트가 여러 개여도 "누가 요청했는지에 따라 응답이 달라지는" 규칙은 하나로 유지한다.
 - **폴드 조기 종료 시 베팅 라운드 상태를 명시적으로 정리**: 전원 폴드로 핸드가 끝나면 `currentBettingRound`를 `null`로 비운다. 그대로 두면 이미 끝난 라운드의 `currentActorId`/`currentBet`이 응답에 남아, 아직 액션 안 한 플레이어 화면에 "내 차례"인 것처럼 잘못 보이는 문제가 있었다.
 - **스케줄러 3종(턴 타이머/자동 시작/헤즈업 공개 결정)이 같은 패턴을 공유**: `TurnTimerService`/`AutoStartService`/`HeadsUpRevealTimerService` 모두 "상태 브로드캐스트마다 조건이 실제로 바뀌었을 때만 다시 예약하고, 타이머 만료 시 예약 시점의 스냅샷과 지금 상태를 비교해서 여전히 유효할 때만 실행"하는 동일한 구조다. `GameEngine`은 스케줄러의 존재 자체를 모르고(순수 도메인 로직만 노출), 이 서비스들도 `GameEngine` 외에는 아무것도 몰라서 순환 의존이 생기지 않는다.
@@ -168,35 +198,35 @@ WebSocket 계층은 연결을 끊지 않고, 문제를 일으킨 세션에만 `{
 
 ## 테스트 현황
 
-JUnit 5 기준 총 **76개** 테스트, 전부 통과.
+JUnit 5 기준 총 **123개** 테스트, 전부 통과.
 
 | 대상 | 파일 | 개수 |
 |---|---|---|
 | 카드/덱 | `DeckTest` | 4 |
 | 족보 판정 | `HandEvaluatorTest` | 15 |
 | 플레이어 | `PlayerTest` | 4 |
-| 방 | `RoomTest` | 3 |
+| 방 (설정 검증, 나가기 좌석 정리, 계정 중복 입장 방지 포함) | `RoomTest` | 13 |
 | 베팅 라운드 (short all-in, 100단위 검증 포함) | `BettingRoundTest` | 7 |
 | 사이드팟 계산 | `PotCalculatorTest` | 2 |
-| 핸드 오케스트레이션 (odd chip rule, zero-chip 방지, 턴 타이머, 레디/자동시작, 헤즈업 머크 포함) | `GameEngineTest` | 23 |
+| 핸드 오케스트레이션 (odd chip rule, zero-chip 방지, 턴 타이머, 레디/자동시작, 헤즈업 머크, 나가기 유예, GAME OVER 리매치, 방 설정 포함) | `GameEngineTest` | 35 |
 | 동시성 | `GameEngineConcurrencyTest` | 3 |
-| REST API (쇼다운 노출, 폴드 종료 상태 정리, 헤즈업 공개 결정 흐름 포함) | `RoomControllerTest` | 10 |
-| WebSocket 프로토콜 | `GameWebSocketHandlerTest` | 4 |
+| REST API (멀티룸 생성/목록/입장/비공개방/자동삭제, 쇼다운 노출, 헤즈업 공개 결정 흐름 포함) | `RoomControllerTest` | 23 |
+| 쇼다운 승자 판정(사이드팟 엣지케이스) | `RoomStateMapperTest` | 2 |
+| WebSocket 프로토콜 (roomCode 기반 연결, 관전자, 거부 케이스 포함) | `GameWebSocketHandlerTest` | 6 |
+| 로그인/인증 | `AuthControllerTest` | 8 |
 | Spring 컨텍스트 로딩 | `BackendApplicationTests` | 1 |
 
 `GameEngineConcurrencyTest`는 정원 초과 동시 참가 방지, 다수의 동시 잘못된 액션 속에서 정상 액션이 정확히 한 번만 반영되는지, 반복적인 상태 읽기 중 핸드를 여러 번 시작해도 예외가 없는지를 검증한다.
 
 ## 아직 구현하지 않은 것 (의도적으로 미룸)
 
-- **DB 연동**: MySQL/JPA 의존성은 `build.gradle`에 주석 처리만 되어 있다. 모든 상태는 서버 메모리에만 존재하며, 서버를 재시작하면 사라진다. 로그인/인증을 붙이는 시점에 실제로 필요해질 예정.
-- **재접속(reconnect) 시 상태 복구**: 연결이 끊기면 세션이 그냥 해제될 뿐, 서버가 별도로 기억해두는 건 없다(프론트엔드가 재연결 시 새 WebSocket 연결로 최신 상태를 다시 받는 방식으로 대응). 다만 턴 타임아웃(위 10번)이 응답 없는 플레이어를 자동 폴드시키므로, 연결이 끊긴 사람 때문에 게임이 무한정 멈추는 문제 자체는 이미 해소되어 있다.
-- **방 나가기(퇴장) 기능**: 지금은 탭을 닫아도 서버에는 좌석이 영구히 남는다. 정원(6명)이 차면 새 플레이어가 못 들어온다.
+- **재접속(reconnect) 시 상태 복구**: 연결이 끊기면 세션이 그냥 해제될 뿐, 서버가 별도로 기억해두는 건 없다(프론트엔드가 재연결 시 새 WebSocket 연결로 최신 상태를 다시 받는 방식으로 대응). 다만 턴 타임아웃(위 10번)이 응답 없는 플레이어를 자동 폴드시키므로, 연결이 끊긴 사람 때문에 게임이 무한정 멈추는 문제 자체는 이미 해소되어 있다. 연결 끊김 자체를 감지해서 일정 시간 뒤 좌석에서 자동 제거하는 기능(수동 "나가기"와 별개)은 아직 없다.
 - **닉네임 중복 방지**: 같은 방에 같은 닉네임으로 여러 명이 들어올 수 있다. 화면에는 닉네임만 보이고(게임 시작 전엔 좌석 배지도 없음) 서로 다른 `playerId`인 두 사람을 구분할 방법이 없다.
-- **로비/멀티룸/roomCode/인증**: 지금은 서버 전체에 고정된 단일 `Room` 하나뿐이다. 여러 방을 동시에 운영하는 기능, 로그인/인증은 전부 이후 단계다.
-- **칩/블라인드 커스터마이징**: 시작 칩(30,000)과 블라인드(100/200)는 `Room`에 고정된 상수다. 방 생성 시 값을 정하는 기능은 멀티룸 도입 후 다룰 예정.
+- **게임 진행 중 중간 입장 시 스택 불균형**: 새로 입장하면 그 시점의 평균이 아니라 방의 시작 칩 그대로 받는다(토너먼트 레이트 레지스트레이션과 구조적으로 같음). "게임 시작 후 입장 금지" 옵션은 아직 없다 — 의도적으로 허용할지 막아야 할지 고민 중.
+- **중간 입장자의 참여 시점**: 지금은 핸드 진행 중에 들어와도 곧바로 다음 핸드부터 자동 참여한다. "입장은 되지만 다음 핸드까지는 관전만" 하는 정책은 아직 없다.
 - **3명 이상 쇼다운의 순서대로 머크**: 지금 머크(13번)는 정확히 2명이 겨루는 경우만 지원한다. 실제 포커는 마지막 액션자부터 순서대로 공개/머크를 묻고 머크하면 실제로 팟을 포기하는데, 이 "진짜" 규칙까지는 캐주얼한 MVP에 안 맞다고 판단해 보류했다.
-- **핸드 히스토리**: 방금 핸드가 어떻게 끝났는지 다시 볼 방법이 없다. DB 연동 이후로 미룸.
-- **캐시게임 리바이 / 매치 재시작**: GAME OVER(12번) 이후엔 그냥 멈춘다. 칩을 다시 채워 재시작하는 캐시게임 모드나 새 매치 시작 기능은 없다.
+- **핸드 히스토리**: 방금 핸드가 어떻게 끝났는지 다시 볼 방법이 없다. DB는 이제 있지만(User 영속화용) 별도 히스토리 테이블 설계가 아직 없다.
+- **방장 뱃지 / 블라인드 상승·앤티 / 대회 입장권(티켓) 시스템**: 전부 논의만 하고 구현은 보류했다.
 
 ## Claude Code와 함께 개발
 
