@@ -11,6 +11,10 @@ import java.util.List;
 // lastAction은 이번 스트리트에서 마지막으로 취한 액션(currentRoundBet과 함께 스트리트 전환 시 null로 리셋)이다.
 // netChipChange는 이번 핸드 시작 시점 대비 현재 칩 증감(chips - chipsAtHandStart)이다 — 핸드가 끝나기 전에는
 // 베팅한 만큼 음수로 보이다가, 핸드가 끝나 팟을 받으면 최종 손익으로 확정된다.
+// autoFolded는 status가 FOLDED일 때만 의미 있으며, 직접 FOLD를 누른 게 아니라 턴 타임아웃으로
+// 자동 폴드됐는지를 나타낸다.
+// leaving은 "나가기"를 예약했는지 — true면 핸드가 끝나는 즉시(또는 핸드 진행 중이 아니면 바로)
+// 방에서 제거된다.
 public record PlayerView(
         String id,
         String nickname,
@@ -21,6 +25,8 @@ public record PlayerView(
         PlayerAction lastAction,
         int netChipChange,
         List<CardView> holeCards,
-        boolean ready
+        boolean ready,
+        boolean autoFolded,
+        boolean leaving
 ) {
 }

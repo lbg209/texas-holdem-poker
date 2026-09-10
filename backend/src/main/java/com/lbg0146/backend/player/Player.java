@@ -9,6 +9,10 @@ public class Player {
 
     private final String id;
     private final String nickname;
+    // 로그인 계정으로 입장했을 때만 값이 있다(게스트는 null). 같은 계정이 방에 중복으로 앉는 걸
+    // 막는 데 쓰인다(Room.addPlayer 참고) — playerId는 매 입장마다 새로 발급되므로 이 값이 없으면
+    // "같은 사람"인지 구분할 방법이 없다.
+    private final Long accountUserId;
 
     private int chips;
     private final List<Card> holeCards = new ArrayList<>();
@@ -27,11 +31,23 @@ public class Player {
     // resetForNewHand()가 초기화하지 않는다 — 한 번 켜두면 계속 유지된다(다음 핸드에도, 그 다음
     // 핸드에도). 잠깐 자리를 비우고 싶으면 직접 꺼야 한다.
     private boolean ready;
+    // 이번 핸드에서 턴 타임아웃으로 자동 폴드됐는지(직접 FOLD를 누른 게 아니라). resetForNewHand()가
+    // 매 핸드 초기화한다 — status(FOLDED)와 달리 "왜 폴드됐는지"만 구분하는 부가 정보다.
+    private boolean autoFolded;
+    // "나가기" 예약 여부. true가 되면 핸드 진행 중이 아닐 때는 즉시, 진행 중이면 이번 핸드가 끝나는
+    // 즉시 방에서 제거된다(GameEngine.requestLeave/removeLeavingPlayers 참고). 한 번 제거되면
+    // Player 자체가 목록에서 사라지므로 이 플래그를 다시 초기화할 일은 없다.
+    private boolean leaving;
 
     public Player(String id, String nickname, int chips) {
+        this(id, nickname, chips, null);
+    }
+
+    public Player(String id, String nickname, int chips, Long accountUserId) {
         this.id = id;
         this.nickname = nickname;
         this.chips = chips;
+        this.accountUserId = accountUserId;
     }
 
     // 칩을 판에 넣는다. 칩이 요청 금액보다 적으면 가진 만큼만 내고(올인), 잔여 칩이 0이 되면
@@ -54,6 +70,12 @@ public class Player {
         chips += amount;
     }
 
+    // GAME OVER 15초 후 리매치를 위해 칩을 특정 값으로 강제 설정한다(딜/베팅 도중 쓰는
+    // commitChips/addChips와 달리 증감이 아니라 절대값 지정). Room.resetForRematch()에서만 쓴다.
+    public void resetChips(int chips) {
+        this.chips = chips;
+    }
+
     public void recordAction(PlayerAction action) {
         lastAction = action;
     }
@@ -71,6 +93,7 @@ public class Player {
         lastAction = null;
         chipsAtHandStart = chips;
         holeCards.clear();
+        autoFolded = false;
     }
 
     public void receiveHoleCard(Card card) {
@@ -83,6 +106,10 @@ public class Player {
 
     public String getNickname() {
         return nickname;
+    }
+
+    public Long getAccountUserId() {
+        return accountUserId;
     }
 
     public int getChips() {
@@ -119,5 +146,21 @@ public class Player {
 
     public void setReady(boolean ready) {
         this.ready = ready;
+    }
+
+    public boolean isAutoFolded() {
+        return autoFolded;
+    }
+
+    public void markAutoFolded() {
+        this.autoFolded = true;
+    }
+
+    public boolean isLeaving() {
+        return leaving;
+    }
+
+    public void setLeaving(boolean leaving) {
+        this.leaving = leaving;
     }
 }

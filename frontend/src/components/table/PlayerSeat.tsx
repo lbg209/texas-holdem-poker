@@ -58,7 +58,7 @@ function getActionLine(player: PlayerView): string | null {
     return 'BUSTED';
   }
   if (player.status === 'FOLDED') {
-    return 'FOLD';
+    return player.autoFolded ? '⏱ FOLD' : 'FOLD';
   }
   if (player.status === 'ALL_IN') {
     return 'ALL-IN';
@@ -287,14 +287,31 @@ export function PlayerSeat({
               {tablePosition && (
                 <span className="ml-1 rounded bg-slate-200 px-1 text-[10px] text-slate-900">{tablePosition}</span>
               )}
-              {player.ready && (
-                <span className="ml-1 rounded bg-emerald-600 px-1 text-[10px] text-white" title="다음 핸드 자동 시작에 동의함">
-                  READY
+              {player.leaving ? (
+                <span
+                  className="ml-1 rounded bg-red-600 px-1 text-[10px] text-white"
+                  title="핸드가 끝나면 방에서 나갑니다"
+                >
+                  나가기 예약
                 </span>
+              ) : (
+                player.ready && (
+                  <span className="ml-1 rounded bg-emerald-600 px-1 text-[10px] text-white" title="다음 핸드 자동 시작에 동의함">
+                    READY
+                  </span>
+                )
               )}
             </span>
             {actionLine && (
-              <span className={player.status === 'BUSTED' ? 'font-bold text-red-500' : 'text-amber-300'}>
+              <span
+                className={
+                  player.status === 'BUSTED'
+                    ? 'font-bold text-red-500'
+                    : player.autoFolded
+                      ? 'text-orange-400'
+                      : 'text-amber-300'
+                }
+              >
                 {actionLine}
               </span>
             )}
@@ -312,7 +329,7 @@ export function PlayerSeat({
             {isWinner && <span className="font-bold text-yellow-400">WINNER</span>}
             {isCurrentActor && (
               <span className="font-semibold text-emerald-400">
-                차례
+                턴
                 {secondsLeft !== null && (
                   <span className={secondsLeft <= URGENT_SECONDS_THRESHOLD ? 'text-red-500' : ''}>
                     {' '}
