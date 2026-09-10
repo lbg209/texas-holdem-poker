@@ -1,6 +1,11 @@
 HELP.md
 .gradle
 build/
+
+### 로컬 전용 시크릿(DB 비밀번호 등) — 절대 커밋하지 않음 ###
+application-local.yaml
+application-local.yml
+application-local.properties
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/

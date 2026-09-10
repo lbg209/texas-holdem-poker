@@ -18,11 +18,12 @@ repositories {
 }
 
 dependencies {
-	// DB 연동 전까지 비활성화: 현재 JPA 엔티티/DataSource 설정이 없어 켜두면 기동 시 에러 발생.
-	// 히스토리 테이블 등 실제 DB 연동 단계(docs/requirements.md 3번 항목 참고)에서 다시 활성화.
-	// implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
-	// runtimeOnly 'com.mysql:mysql-connector-j'
-	// testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+	runtimeOnly 'com.mysql:mysql-connector-j'
+	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
+	// 로그인 비밀번호 해싱(BCrypt)만 필요 — spring-boot-starter-security 전체를 넣으면 모든 REST
+	// 엔드포인트에 인증 필터가 자동 적용돼 지금 열려있는 게임 API들이 막혀버려서 이 경량 모듈만 쓴다.
+	implementation 'org.springframework.security:spring-security-crypto'
 	implementation 'org.springframework.boot:spring-boot-starter-validation'
 	implementation 'org.springframework.boot:spring-boot-starter-webmvc'
 	implementation 'org.springframework.boot:spring-boot-starter-websocket'
