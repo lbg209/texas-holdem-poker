@@ -29,16 +29,19 @@ export function getHandRankLabel(handRank: HandRank, bestFive: CardView[]): stri
 }
 
 // 하이라이트 색상 = 족보 등급에 따른 화려함 단계. gold가 기본(하이카드~트리플)이고, 등급이
-// 올라갈수록 특별해진다: silver(스트레이트/플러시) < orange(풀하우스) < purple(포카드) <
-// special(스트레이트 플러시) < royal(로열 플러시). blue는 실제 게임에서는 안 쓰이고
+// 올라갈수록 특별해진다: cyan(스트레이트) < indigo(플러시) < orange(풀하우스) < purple(포카드) <
+// special(스트레이트 플러시) < royal(로열 플러시). 스트레이트보다 플러시가 더 높은 족보라
+// 2026-09-11에 둘을 분리했다(원래는 같은 색이었음). blue는 실제 게임에서는 안 쓰이고
 // RulesPage(족보 설명) 예시에서만 임의로 쓰인다.
-export type HighlightColor = 'gold' | 'blue' | 'silver' | 'orange' | 'purple' | 'special' | 'royal';
+// (cyan은 원래 silver였는데, 카드가 흰 배경이라 거의 안 보인다는 피드백을 받고 2026-09-11에 바꿈.)
+export type HighlightColor = 'gold' | 'blue' | 'cyan' | 'indigo' | 'orange' | 'purple' | 'special' | 'royal';
 
 export function getHighlightColorForHandRank(handRank: HandRank, bestFive: CardView[]): HighlightColor {
   switch (handRank) {
     case 'STRAIGHT':
+      return 'cyan';
     case 'FLUSH':
-      return 'silver';
+      return 'indigo';
     case 'FULL_HOUSE':
       return 'orange';
     case 'FOUR_OF_A_KIND':
@@ -54,7 +57,8 @@ export function getHighlightColorForHandRank(handRank: HandRank, bestFive: CardV
 const HAND_RANK_TEXT_STYLE: Record<HighlightColor, string> = {
   gold: 'font-medium text-sky-300',
   blue: 'font-medium text-sky-300',
-  silver: 'font-semibold text-slate-100',
+  cyan: 'font-semibold text-cyan-300',
+  indigo: 'font-semibold text-indigo-300',
   orange: 'font-semibold text-orange-300',
   purple: 'font-bold text-purple-300',
   special: 'bg-gradient-to-r from-fuchsia-300 via-amber-200 to-yellow-300 bg-clip-text font-bold text-transparent drop-shadow',

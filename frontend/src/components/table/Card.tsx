@@ -42,7 +42,8 @@ const CARD_VIEW_BOX = '0 0 169.075 244.640';
 const HIGHLIGHT_STYLE: Record<HighlightColor, string> = {
   gold: 'border-yellow-400 shadow-[0_0_14px_rgba(250,204,21,0.85)] ring-[4px] ring-inset ring-yellow-400',
   blue: 'border-sky-400 shadow-[0_0_14px_rgba(56,189,248,0.85)] ring-[4px] ring-inset ring-sky-400',
-  silver: 'border-slate-200 shadow-[0_0_16px_rgba(226,232,240,0.85)] ring-[4px] ring-inset ring-slate-200',
+  cyan: 'border-cyan-400 shadow-[0_0_16px_rgba(34,211,238,0.85)] ring-[4px] ring-inset ring-cyan-400',
+  indigo: 'border-indigo-400 shadow-[0_0_17px_rgba(129,140,248,0.9)] ring-[4px] ring-inset ring-indigo-400',
   orange: 'border-orange-400 shadow-[0_0_18px_rgba(251,146,60,0.9)] ring-[4px] ring-inset ring-orange-400',
   purple: 'border-purple-400 shadow-[0_0_20px_rgba(192,132,252,0.9)] ring-[4px] ring-inset ring-purple-400',
   special:
@@ -57,7 +58,8 @@ const HIGHLIGHT_STYLE: Record<HighlightColor, string> = {
 const WINNER_PULSE_SCALE: Record<HighlightColor, number[]> = {
   gold: [1, 1.25, 1],
   blue: [1, 1.25, 1],
-  silver: [1, 1.25, 1],
+  cyan: [1, 1.25, 1],
+  indigo: [1, 1.27, 1],
   orange: [1, 1.28, 1],
   purple: [1, 1.32, 1],
   special: [1, 1.38, 1],
