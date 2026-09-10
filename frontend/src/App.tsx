@@ -1,9 +1,11 @@
 import { RoomProvider, useRoom } from './state/RoomContext';
-import { JoinForm } from './components/room/JoinForm';
+import { AuthScreen } from './components/room/AuthScreen';
+import { LobbyScreen } from './components/room/LobbyScreen';
 import { TableHeader } from './components/table/TableHeader';
 import { PokerTable } from './components/table/PokerTable';
 import { ActionBar } from './components/table/ActionBar';
 import { ShowdownDecisionPanel } from './components/table/ShowdownDecisionPanel';
+import { RoomInfoToggle } from './components/table/RoomInfoToggle';
 
 function RoomGate() {
   const { state } = useRoom();
@@ -12,12 +14,17 @@ function RoomGate() {
     return <p className="mt-24 text-center text-slate-400">확인 중...</p>;
   }
 
-  if (!state.myPlayerId) {
-    return <JoinForm />;
+  if (state.screen === 'auth') {
+    return <AuthScreen />;
+  }
+
+  if (state.screen === 'lobby') {
+    return <LobbyScreen />;
   }
 
   return (
     <>
+      <RoomInfoToggle />
       <TableHeader />
       {state.displayState && (
         <>
