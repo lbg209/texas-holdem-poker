@@ -62,7 +62,8 @@ export function PokerTable({ displayState, activeVisualEvent, dealProgress, myPl
       {/* displayState 기준 — 마지막 핸드의 연출(칩 이동/승자 하이라이트)이 다 재생된 뒤에만 뜬다. */}
       {displayState.winnerId && (
         <GameOverOverlay
-          winnerNickname={displayState.players.find((p) => p.id === displayState.winnerId)?.nickname ?? '알 수 없음'}
+          winnerNickname={displayState.winnerNickname ?? '알 수 없음'}
+          resetAtMillis={displayState.gameOverResetAtMillis}
         />
       )}
     </div>

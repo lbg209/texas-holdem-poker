@@ -146,6 +146,14 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
     return dealNewHandSteps(next);
   }
 
+  // GAME OVER 15초 카운트다운이 끝나 리매치를 위해 방이 리셋된 경우(phase: SHOWDOWN -> null).
+  // 정상적인 스트리트 진행/핸드 종료가 아니라 완전히 다른 종류의 전환이라, 아래의 일반적인 진단
+  // 로직(액션/칩 이동/카드 공개)을 태우지 않고 애니메이션 없이 곧바로 next로 스냅한다 — 안 그러면
+  // 커뮤니티 카드 등 옛 핸드의 잔상이 새 대기 화면에 잠깐이라도 남을 수 있다.
+  if (prev.phase === 'SHOWDOWN' && next.phase === null) {
+    return [];
+  }
+
   const steps: AnimationStep[] = [];
 
   // 1) 누군가 새로 액션했으면(폴드 포함) 그 결과(액션 라벨/베팅액/칩)를 먼저 보여주고 잠깐 유지한다.
