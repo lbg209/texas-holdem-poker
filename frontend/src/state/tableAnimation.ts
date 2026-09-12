@@ -1,12 +1,25 @@
-import type { PlayerActionType, PlayerView, RoomStateResponse } from '../types/room';
+import type { CardView, HandRank, PlayerActionType, PlayerView, RoomStateResponse } from '../types/room';
 
-// 테이블 위에서 재생할 시각 이벤트. 큐가 현재 어떤 연출을 보여주고 있는지를 나타내며,
+// 테이블 위에서 재생할 시각/청각 이벤트. 큐가 현재 어떤 연출을 보여주고 있는지를 나타내며,
 // FlyingChips/DealingCards 같은 오버레이 컴포넌트가 이 값을 보고 무엇을 어디로 움직일지 결정한다.
+// ACTION_TAKEN/HOLE_CARD_REVEALED는 화면 연출은 없고(기존처럼 패치만 적용) 사운드 훅(useSoundEffects)
+// 전용으로만 쓰인다 — 시각 컴포넌트들은 모르는 타입은 그냥 무시하고 아무것도 안 그린다.
 export type ActiveVisualEvent =
   | { type: 'DEAL_CARD'; playerId: string; sequence: number }
   | { type: 'CHIPS_TO_POT'; contributions: { playerId: string; amount: number }[] }
   | { type: 'BLIND_FLOURISH'; contributions: { playerId: string; amount: number }[] }
-  | { type: 'POT_TO_WINNERS'; winnerPlayerIds: string[]; reason: 'FOLD' | 'SHOWDOWN' };
+  | {
+      type: 'POT_TO_WINNERS';
+      winnerPlayerIds: string[];
+      reason: 'FOLD' | 'SHOWDOWN';
+      // 실제 쇼다운이고, 이긴 사람의 족보가 이 클라이언트에 공개돼 있으면(머크 안 했으면) 채워진다
+      // — 사운드 훅이 "이 등급이면 영어로 불러줄지" 판단하는 데 쓴다.
+      winningHandRank: HandRank | null;
+      winningHandBestFive: CardView[] | null;
+    }
+  | { type: 'ACTION_TAKEN'; playerId: string; action: PlayerActionType }
+  | { type: 'HOLE_CARD_REVEALED'; playerId: string }
+  | { type: 'COMMUNITY_CARD_REVEALED'; isSlow: boolean };
 
 export interface AnimationStep {
   visualEvent: ActiveVisualEvent | null;
@@ -198,8 +211,20 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
   }
 
   if (actedIds.length > 0) {
+    // 사운드 전용 — 실제로 어떤 액션이었는지는 화면 라벨(getActionLine)과 같은 기준으로 판단한다:
+    // 폴드/올인은 status로(레디 등 다른 이유로 lastAction이 리셋됐어도 정확), 나머지는 위에서
+    // 이미 역산해둔 reconstructedLastAction을 그대로 쓴다.
+    const actedId = actedIds[0];
+    const actedPlayer = findPlayer(next.players, actedId)!;
+    const actionForSound: PlayerActionType | null =
+      actedPlayer.status === 'FOLDED'
+        ? 'FOLD'
+        : actedPlayer.status === 'ALL_IN'
+          ? 'ALL_IN'
+          : (reconstructedLastAction.get(actedId) ?? null);
+
     steps.push({
-      visualEvent: null,
+      visualEvent: actionForSound ? { type: 'ACTION_TAKEN', playerId: actedId, action: actionForSound } : null,
       durationMs: ACTION_HOLD_MS,
       // 이번 액션으로 차례가 넘어가는 중이므로, 이 스텝부터 이번 diff 사이클이 끝날 때까지
       // (칩 이동/커뮤니티 카드 공개 연출이 다 끝나 finishCycle이 진짜 최신 상태로 스냅할 때까지)
@@ -264,7 +289,7 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
       const newCardIndex = revealedCount + i - 1;
       const isSlow = newCardIndex >= FLOP_CARD_COUNT;
       steps.push({
-        visualEvent: null,
+        visualEvent: { type: 'COMMUNITY_CARD_REVEALED', isSlow },
         durationMs: isSlow ? SLOW_CARD_STEP_MS : CARD_INTERVAL_MS,
         patch: (state) => ({
           ...state,
@@ -295,7 +320,7 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
 
       for (const target of revealTargets) {
         steps.push({
-          visualEvent: null,
+          visualEvent: { type: 'HOLE_CARD_REVEALED', playerId: target.playerId },
           durationMs: HOLE_CARD_REVEAL_STEP_MS,
           patch: (state) => ({
             ...state,
@@ -311,8 +336,17 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
       }
     }
 
+    // 이긴 사람의 족보(이 클라이언트에 공개돼 있는 경우만 — 머크했으면 null) — 사운드 훅이 영어로
+    // 불러줄지 판단하는 데 쓴다. 스플릿팟이면 그중 공개된 아무 한 명 것이나 쓴다(같은 등급이므로).
+    const winningHand = next.showdownHands?.find((h) => h.isWinner && h.handRank !== null && h.bestFive !== null);
     steps.push({
-      visualEvent: { type: 'POT_TO_WINNERS', winnerPlayerIds: winnerIds, reason },
+      visualEvent: {
+        type: 'POT_TO_WINNERS',
+        winnerPlayerIds: winnerIds,
+        reason,
+        winningHandRank: winningHand?.handRank ?? null,
+        winningHandBestFive: winningHand?.bestFive ?? null,
+      },
       durationMs: POT_TO_WINNER_MS,
       patch: () => next,
     });

@@ -1,0 +1,22 @@
+Sound effects in this directory are sourced from bigsoundbank.com (Joseph Sardin)
+unless noted otherwise, released under CC0 (public domain) — free for commercial
+and non-commercial use, no attribution required. https://bigsoundbank.com/about.html
+
+card-deal.mp3, card-flip.mp3   <- "Turned Page" (bigsoundbank.com/turned-page-s0164.html)
+fold.mp3                        <- "Playing Card Slide Right" by el_boss, CC0
+                                    (freesound.org/people/el_boss/sounds/571581/)
+chip-call.mp3, chip-blind.mp3   <- "Poker Chips" (bigsoundbank.com/poker-chips-s0942.html)
+chip-bet.mp3                    <- "Poker Chips #2" (bigsoundbank.com/poker-chips-2-s0943.html)
+chip-raise.mp3                  <- "Poker Chips #4" (bigsoundbank.com/poker-chips-4-s0945.html)
+chip-allin.mp3                  <- "Small Bell #1" (bigsoundbank.com/small-bell-1-s0292.html)
+                                    — a soft single handbell ring, trimmed to ~1.3s + played quieter
+pot-win.mp3                     <- "Coins #1" (bigsoundbank.com/coins-1-s0193.html)
+timer-tick.mp3                  <- "Timer #2" (bigsoundbank.com/timer-2-s0082.html)
+my-turn.mp3                     <- "Coin in cup #1" (bigsoundbank.com/coin-in-cup-1-s0339.html)
+game-win.mp3                    <- "Applause Concert Bar #4" (applause only, no cheering/shouting)
+                                    (bigsoundbank.com/applause-concert-bar-4-s2482.html)
+                                    — played at ~55% volume
+
+Hand-rank callouts ("Straight", "Full House", "Royal Flush", etc.) are NOT audio files — they're
+read aloud live via the browser's built-in Web Speech API (SpeechSynthesisUtterance), so there's
+nothing to license/attribute for those.

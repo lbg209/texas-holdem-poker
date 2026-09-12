@@ -8,6 +8,8 @@ interface CommunityCardsProps {
   highlightCards?: HighlightedCard[];
 }
 
+// 이 두 딜레이 값은 lib/useSoundEffects.ts의 COMMUNITY_FLIP_SOUND_DELAY_MS와 반드시 같이 맞춰야
+// 한다 — 카드 뒤집는 소리가 실제로 뒤집히는 시점(딜레이가 끝나는 시점)에 맞게 재생되기 때문.
 const NORMAL_FLIP_DELAY_MS = 150;
 const NORMAL_FLIP_DURATION_MS = 350;
 // 턴/리버는 뒷면으로 좀 더 오래 머물렀다가 천천히 뒤집혀서 긴장감을 준다. 플랍(첫 3장)만 빠르게.

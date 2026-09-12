@@ -28,6 +28,23 @@ export function getHandRankLabel(handRank: HandRank, bestFive: CardView[]): stri
   return isRoyalFlush(handRank, bestFive) ? '로열 플러시' : LABELS[handRank];
 }
 
+// 쇼다운에서 음성으로 불러줄 영어 족보명 — 스트레이트 이상만 대상이다(그 아래는 하이라이트도
+// 기본(gold) 등급이라 너무 자주 나와서, 매번 소리까지 내면 거슬린다는 판단). 대상이 아니면 null.
+const ANNOUNCEMENT: Partial<Record<HandRank, string>> = {
+  STRAIGHT: 'Straight',
+  FLUSH: 'Flush',
+  FULL_HOUSE: 'Full House',
+  FOUR_OF_A_KIND: 'Four of a Kind',
+  STRAIGHT_FLUSH: 'Straight Flush',
+};
+
+export function getHandRankAnnouncement(handRank: HandRank, bestFive: CardView[]): string | null {
+  if (isRoyalFlush(handRank, bestFive)) {
+    return 'Royal Flush';
+  }
+  return ANNOUNCEMENT[handRank] ?? null;
+}
+
 // 하이라이트 색상 = 족보 등급에 따른 화려함 단계. gold가 기본(하이카드~트리플)이고, 등급이
 // 올라갈수록 특별해진다: cyan(스트레이트) < indigo(플러시) < orange(풀하우스) < purple(포카드) <
 // special(스트레이트 플러시) < royal(로열 플러시). 스트레이트보다 플러시가 더 높은 족보라
