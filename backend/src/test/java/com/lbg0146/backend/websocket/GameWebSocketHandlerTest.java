@@ -39,7 +39,7 @@ class GameWebSocketHandlerTest {
     private final StandardWebSocketClient client = new StandardWebSocketClient();
 
     private String createRoom() {
-        return roomManager.createRoom("테스트방", false, null, 30_000, 200, 6);
+        return roomManager.createRoom("테스트방", false, null, 30_000, 200);
     }
 
     private String join(String roomCode, String nickname) {

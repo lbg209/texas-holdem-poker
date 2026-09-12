@@ -43,7 +43,6 @@ class RoomControllerTest {
 
     private static final int DEFAULT_STARTING_CHIPS = 30_000;
     private static final int DEFAULT_BIG_BLIND = 200;
-    private static final int DEFAULT_MAX_PLAYERS = 6;
 
     @Autowired
     private MockMvc mockMvc;
@@ -53,13 +52,12 @@ class RoomControllerTest {
     private RoomManager roomManager;
 
     private String createRoom() throws Exception {
-        return createRoom(DEFAULT_STARTING_CHIPS, DEFAULT_BIG_BLIND, DEFAULT_MAX_PLAYERS);
+        return createRoom(DEFAULT_STARTING_CHIPS, DEFAULT_BIG_BLIND);
     }
 
-    private String createRoom(int startingChips, int bigBlind, int maxPlayers) throws Exception {
+    private String createRoom(int startingChips, int bigBlind) throws Exception {
         String body = "{\"name\":\"테스트방\",\"isPrivate\":false,\"password\":null,"
-                + "\"startingChips\":" + startingChips + ",\"bigBlind\":" + bigBlind
-                + ",\"maxPlayers\":" + maxPlayers + "}";
+                + "\"startingChips\":" + startingChips + ",\"bigBlind\":" + bigBlind + "}";
         MvcResult result = mockMvc.perform(post("/api/rooms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -70,8 +68,7 @@ class RoomControllerTest {
 
     private String createPrivateRoom(String password) throws Exception {
         String body = "{\"name\":\"비공개방\",\"isPrivate\":true,\"password\":\"" + password + "\","
-                + "\"startingChips\":" + DEFAULT_STARTING_CHIPS + ",\"bigBlind\":" + DEFAULT_BIG_BLIND
-                + ",\"maxPlayers\":" + DEFAULT_MAX_PLAYERS + "}";
+                + "\"startingChips\":" + DEFAULT_STARTING_CHIPS + ",\"bigBlind\":" + DEFAULT_BIG_BLIND + "}";
         MvcResult result = mockMvc.perform(post("/api/rooms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -132,7 +129,7 @@ class RoomControllerTest {
 
     @Test
     void 방을_만들때_설정한_값이_그대로_적용된다() throws Exception {
-        String roomCode = createRoom(50_000, 1000, 4);
+        String roomCode = createRoom(50_000, 1000);
 
         String playerId = join(roomCode, "Alice");
         RoomStateResponse response = readRoomState(get("/api/rooms/" + roomCode).param("playerId", playerId));
@@ -140,14 +137,14 @@ class RoomControllerTest {
         assertEquals(50_000, response.startingChips());
         assertEquals(1000, response.bigBlind());
         assertEquals(500, response.smallBlind());
-        assertEquals(4, response.maxPlayers());
+        assertEquals(6, response.maxPlayers(), "좌석 수는 더 이상 설정할 수 없고 항상 6석 고정이다");
         assertEquals(50_000, findPlayer(response, playerId).chips());
     }
 
     @Test
     void 빅블라인드가_단위에_맞지_않으면_방_생성이_400을_반환한다() throws Exception {
         String body = "{\"name\":\"잘못된방\",\"isPrivate\":false,\"password\":null,"
-                + "\"startingChips\":30000,\"bigBlind\":150,\"maxPlayers\":6}";
+                + "\"startingChips\":30000,\"bigBlind\":150}";
         mockMvc.perform(post("/api/rooms")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(body))
@@ -327,7 +324,7 @@ class RoomControllerTest {
     @Test
     void 정원을_초과해서_참가하면_409를_반환한다() throws Exception {
         String roomCode = createRoom();
-        for (int i = 0; i < DEFAULT_MAX_PLAYERS; i++) {
+        for (int i = 0; i < Room.MAX_PLAYERS; i++) {
             join(roomCode, "P" + i);
         }
 
@@ -389,7 +386,9 @@ class RoomControllerTest {
         RoomStateResponse afterAliceCalls = readRoomState(get("/api/rooms/" + roomCode));
         // 아직 쇼다운(핸드 종료) 전이지만, Alice가 콜해서 둘 다 BIG_BLIND씩 낸 상태 — 응답에 바로 반영돼야 한다.
         assertEquals(1, afterAliceCalls.pots().size());
-        assertEquals(Room.BIG_BLIND * 2, afterAliceCalls.pots().get(0).amount());
+        // 레벨 1부터 앤티(빅블라인드와 같은 금액, Bob이 빅블라인드 자리라서 혼자 냄)가 메인팟에
+        // 같이 들어가 있어야 한다 — 둘의 블라인드/콜(BIG_BLIND*2)에 앤티(BIG_BLIND)를 더한 금액.
+        assertEquals(Room.BIG_BLIND * 2 + Room.BIG_BLIND, afterAliceCalls.pots().get(0).amount());
         assertEquals(Room.BIG_BLIND, findPlayer(afterAliceCalls, aliceId).totalHandContribution());
         assertEquals(Room.BIG_BLIND, findPlayer(afterAliceCalls, bobId).totalHandContribution());
         assertEquals(PlayerAction.CALL, findPlayer(afterAliceCalls, aliceId).lastAction());

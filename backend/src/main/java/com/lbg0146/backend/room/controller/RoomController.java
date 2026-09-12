@@ -9,6 +9,7 @@ import com.lbg0146.backend.room.RoomInstance;
 import com.lbg0146.backend.room.RoomManager;
 import com.lbg0146.backend.room.controller.dto.CreateRoomRequest;
 import com.lbg0146.backend.room.controller.dto.CreateRoomResponse;
+import com.lbg0146.backend.room.controller.dto.HandHistoryEntryView;
 import com.lbg0146.backend.room.controller.dto.JoinPlayerRequest;
 import com.lbg0146.backend.room.controller.dto.JoinPlayerResponse;
 import com.lbg0146.backend.room.controller.dto.RoomStateResponse;
@@ -51,7 +52,7 @@ public class RoomController {
     @PostMapping
     public ResponseEntity<CreateRoomResponse> createRoom(@RequestBody CreateRoomRequest request) {
         String roomCode = roomManager.createRoom(request.name(), request.isPrivate(), request.password(),
-                request.startingChips(), request.bigBlind(), request.maxPlayers());
+                request.startingChips(), request.bigBlind());
         return ResponseEntity.status(HttpStatus.CREATED).body(new CreateRoomResponse(roomCode));
     }
 
@@ -99,7 +100,11 @@ public class RoomController {
         String nickname = user.map(User::getNickname).orElseGet(() -> guestNickname(request.nickname()));
         Player player = new Player(playerId, nickname, instance.getGameEngine().getRoom().getStartingChips(),
                 user.map(User::getId).orElse(null));
-        instance.getGameEngine().addPlayer(player);
+        if (request.seatIndex() != null) {
+            instance.getGameEngine().addPlayer(player, request.seatIndex());
+        } else {
+            instance.getGameEngine().addPlayer(player);
+        }
         instance.getBroadcaster().broadcastState();
         return new JoinPlayerResponse(playerId);
     }
@@ -141,6 +146,39 @@ public class RoomController {
             @RequestParam boolean leaving) {
         RoomInstance instance = roomManager.findRoom(roomCode);
         instance.getGameEngine().requestLeave(playerId, leaving);
+        instance.getBroadcaster().broadcastState();
+        return instance.getGameEngine().withLock(() -> buildResponse(instance, playerId));
+    }
+
+    // 이 방의 최근 핸드 히스토리(최대 30개, 최신순). DB에 저장하지 않고 방이 사라지면 같이
+    // 사라진다. playerId를 주면 본인 카드 + 그 핸드에서 실제로 공개됐던 카드만 보이고, 생략하면
+    // 관전자 시점(아무도 공개 안 한 카드는 전부 숨김)으로 내려간다.
+    @GetMapping("/{roomCode}/history")
+    public List<HandHistoryEntryView> getHandHistory(@PathVariable String roomCode,
+            @RequestParam(required = false) String playerId) {
+        RoomInstance instance = roomManager.findRoom(roomCode);
+        return instance.getGameEngine()
+                .withLock(() -> HandHistoryMapper.toResponse(instance.getGameEngine().getRoom(), playerId));
+    }
+
+    // 방장이 레디 안 한 플레이어를 강퇴한다(핸드 진행 중이거나, 대상이 레디했거나, 레디 안 한 지
+    // 3초가 안 지났으면 거부됨). 남은 시간은 응답에 노출하지 않는다 — 너무 일찍 시도하면 그냥 실패한다.
+    @PostMapping("/{roomCode}/players/{targetId}/kick")
+    public RoomStateResponse kickPlayer(@PathVariable String roomCode, @PathVariable String targetId,
+            @RequestParam String requesterId) {
+        RoomInstance instance = roomManager.findRoom(roomCode);
+        instance.getGameEngine().kickPlayer(requesterId, targetId);
+        instance.getBroadcaster().broadcastState();
+        return instance.getGameEngine().withLock(() -> buildResponse(instance, requesterId));
+    }
+
+    // 이미 앉아있는 플레이어가 다른 빈 좌석으로 옮긴다. 핸드 진행 중이거나, 너무 빠르게 연속으로
+    // 옮기려 하거나, 그 좌석이 이미 차 있으면 거부된다.
+    @PostMapping("/{roomCode}/players/{playerId}/seat")
+    public RoomStateResponse moveSeat(@PathVariable String roomCode, @PathVariable String playerId,
+            @RequestParam int seatIndex) {
+        RoomInstance instance = roomManager.findRoom(roomCode);
+        instance.getGameEngine().requestSeatMove(playerId, seatIndex);
         instance.getBroadcaster().broadcastState();
         return instance.getGameEngine().withLock(() -> buildResponse(instance, playerId));
     }

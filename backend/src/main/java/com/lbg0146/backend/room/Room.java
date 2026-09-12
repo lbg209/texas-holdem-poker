@@ -8,7 +8,10 @@ import com.lbg0146.backend.game.ShowdownResult;
 import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerStatus;
 
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.Deque;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -16,12 +19,14 @@ import java.util.Set;
 // 단일 고정 테이블의 상태를 담는 객체. 게임 진행/계산 로직은 game 패키지(GameEngine 등)가 담당한다.
 public class Room {
 
-    // 아래 4개는 "기본값"이다 — 방이 비어있을 때 configure()로 바꾸지 않으면 이 값 그대로 쓰인다.
+    // 아래 2개는 "기본값"이다 — 방이 비어있을 때 configure()로 바꾸지 않으면 이 값 그대로 쓰인다.
     public static final int SMALL_BLIND = 100;
     public static final int BIG_BLIND = 200;
     public static final int STARTING_CHIPS = 30_000;
+    // 고정 좌석 수 — 방마다 다르게 설정할 수 없다(예전엔 방 생성 시 2~6명 중 고를 수 있었는데,
+    // 고정 좌석제(빈자리 클릭해서 앉기/옮기기) 도입으로 항상 6자리로 통일했다).
     public static final int MAX_PLAYERS = 6;
-    // 아래 2개는 방마다 다르게 설정할 수 없는 고정값이다.
+    // 핸드를 시작하려면 최소 이만큼은 앉아있어야 한다. 좌석 수(MAX_PLAYERS)와는 별개 개념이다.
     public static final int MIN_PLAYERS = 2;
     // BET/RAISE 금액은 이 단위의 배수여야 한다. 단, 보유 칩 전부를 거는 경우(사실상 올인)는 예외로 허용한다.
     public static final int BET_UNIT = 100;
@@ -31,7 +36,6 @@ public class Room {
     private int smallBlind = SMALL_BLIND;
     private int bigBlind = BIG_BLIND;
     private int startingChips = STARTING_CHIPS;
-    private int maxPlayers = MAX_PLAYERS;
 
     private final List<Player> players = new ArrayList<>();
     private final List<Card> communityCards = new ArrayList<>();
@@ -80,6 +84,48 @@ public class Room {
     // isPrivate=false면 항상 null이다.
     private String password;
 
+    // 방장(방을 만든 뒤 가장 먼저 입장한 사람)의 playerId. addPlayer()가 방이 비어있을 때 첫
+    // 입장자를 방장으로 지정하고, removeLeavingPlayers()가 방장이 나가면 남은 사람 중 가장 오래
+    // 앉아있는 사람(players 리스트의 첫 번째 — 입장 순서가 그대로 유지됨)에게 자동 승계한다.
+    // 방이 완전히 비면 null로 돌아간다. 순수 표시용 배지 + 강퇴 권한 판단에만 쓰인다.
+    private String ownerId;
+
+    // 핸드 히스토리 — DB에 저장하지 않고 이 방(RoomInstance)이 살아있는 동안만 메모리에 최근
+    // MAX_HAND_HISTORY개만 유지한다(방이 사라지면 같이 사라짐). 최신이 맨 앞에 오도록 addFirst만 쓴다.
+    private static final int MAX_HAND_HISTORY = 30;
+    private int handCounter;
+    private final Deque<HandHistoryEntry> handHistory = new ArrayDeque<>();
+
+    // 블라인드 상승 스케줄 — 시작 빅블라인드 대비 배율. HANDS_PER_LEVEL판마다 다음 단계로 오르고,
+    // 마지막 단계(5배) 이후로는 더 오르지 않고 그대로 유지된다(고정 6단계 스케줄, 무한정 계속
+    // 오르지는 않음). 앤티는 실제 대회(JOPT 등)처럼 레벨 1부터 계속 걷힌다 — "빅블라인드 앤티"
+    // 방식이라 빅블라인드 자리에 앉은 사람이 그 레벨 빅블라인드와 같은 금액을 자기 빅블라인드에
+    // 더해 혼자 추가로 낸다(GameEngine.postBlinds 참고). 레벨이 오르면 앤티도 그 레벨 빅블라인드를
+    // 그대로 따라가며 같이 오른다.
+    private static final double[] BLIND_LEVEL_MULTIPLIERS = {1.0, 1.5, 2.0, 3.0, 4.0, 5.0};
+    private static final int HANDS_PER_LEVEL = 15;
+    private static final int ANTE_START_LEVEL_INDEX = 0;
+
+    // 방 생성 시 정한 시작 빅블라인드 — 블라인드 상승 배율 계산의 기준값. configure() 시점에
+    // 고정되고 이후 안 바뀐다(bigBlind/smallBlind 필드 자체는 레벨이 오르면서 계속 갱신됨).
+    private int baseBigBlind = BIG_BLIND;
+    // 블라인드가 마지막으로 리셋된 뒤(방 시작, 또는 GAME OVER 리매치) 지금까지 끝난 핸드 수.
+    // 이 값으로 현재 블라인드 레벨을 계산한다.
+    private int handsSinceBlindReset;
+    private int ante;
+    // 이번 핸드에서 실제로 걷힌 앤티 총액(숏스택이면 명목 앤티보다 적을 수 있음) — 특정 플레이어
+    // 소유가 아니라 팟 전체에 속하는 "죽은 돈"이라 Player.totalHandContribution과는 별도로 여기
+    // 들고 있다가, PotCalculator가 메인팟에 통째로 더한다. 새 핸드가 시작되면 0으로 리셋된다.
+    private int anteCollectedThisHand;
+    // 이 핸드가 실제로 끝난 시각(ms) — GameEngine.onHandConcluded()가 매 핸드 종료 시점마다 갱신한다.
+    // "나가기"를 눌렀을 때 결과 화면을 보호할 필요가 아직 있는지(프론트 useShowBoard.ts의
+    // RESULT_HOLD_MS만큼 시간이 지났는지) 판단하는 데 쓰인다(GameEngine.canLeaveImmediately 참고).
+    private long handConcludedAtMillis;
+
+    public String getOwnerId() {
+        return ownerId;
+    }
+
     // RoomManager가 방 생성 직후 한 번만 호출한다. roomCode/name은 이후 바뀌지 않는다.
     public void initIdentity(String roomCode, String name, boolean isPrivate, String password) {
         this.roomCode = roomCode;
@@ -104,10 +150,10 @@ public class Room {
         return password;
     }
 
-    // 방 설정(시작 칩/빅블라인드/최대 인원)을 바꾼다. 방이 완전히 비어있을 때만 허용된다 — 이미
-    // 누가 참가했으면 그 사람 기준으로 이미 확정된 설정을 뒤바꿀 수 없다. 스몰블라인드는 따로
-    // 입력받지 않고 항상 빅블라인드의 절반으로 자동 계산한다(실제 포커 대회 관례).
-    public void configure(int startingChips, int bigBlind, int maxPlayers) {
+    // 방 설정(시작 칩/빅블라인드)을 바꾼다. 방이 완전히 비어있을 때만 허용된다 — 이미 누가
+    // 참가했으면 그 사람 기준으로 이미 확정된 설정을 뒤바꿀 수 없다. 스몰블라인드는 따로 입력받지
+    // 않고 항상 빅블라인드의 절반으로 자동 계산한다(실제 포커 대회 관례).
+    public void configure(int startingChips, int bigBlind) {
         if (!players.isEmpty()) {
             throw new GameStateException("이미 참가자가 있어 방 설정을 변경할 수 없습니다.");
         }
@@ -117,18 +163,32 @@ public class Room {
         if (bigBlind <= 0 || bigBlind % BET_UNIT != 0) {
             throw new InvalidActionException("빅블라인드는 " + BET_UNIT + " 단위의 양수여야 합니다.");
         }
-        if (maxPlayers < MIN_PLAYERS || maxPlayers > MAX_PLAYERS) {
-            throw new InvalidActionException("최대 인원은 " + MIN_PLAYERS + "~" + MAX_PLAYERS + "명 사이여야 합니다.");
-        }
         this.startingChips = startingChips;
         this.bigBlind = bigBlind;
         this.smallBlind = bigBlind / 2;
-        this.maxPlayers = maxPlayers;
+        this.baseBigBlind = bigBlind;
+        // 레벨 1의 앤티까지 지금 바로 반영해둔다 — 안 그러면 첫 핸드가 시작되기 전(예: 로비 상세
+        // 정보 조회 시점)에는 ante가 기본값 0으로 남아있어서, 방금 만든 방인데 앤티가 안 보이는
+        // 것처럼 보이는 문제가 있었다(실사용 중 발견됨).
+        applyBlindLevel();
     }
 
+    // 빈 좌석 중 가장 낮은 번호에 자동으로 앉힌다. 주로 테스트와 "방 만들기" 직후 혼자인 방에
+    // 들어가는 경우처럼 굳이 좌석을 직접 고를 필요가 없을 때 쓴다 — 실제 로비에서 들어오는
+    // 입장은 항상 addPlayer(player, seatIndex)로 사용자가 클릭한 좌석을 명시한다.
     public void addPlayer(Player player) {
-        if (players.size() >= maxPlayers) {
-            throw new GameStateException("테이블 정원(" + maxPlayers + "명)이 가득 찼습니다.");
+        addPlayer(player, nextFreeSeatIndex());
+    }
+
+    // 명시적으로 지정한 좌석에 앉힌다(고정 좌석제 — 빈자리 클릭해서 입장). 그 좌석이 이미 차 있으면
+    // 거부된다. players 리스트는 항상 seatIndex 오름차순으로 유지되므로, 버튼 이동(moveButtonToNextSeat)
+    // 등 "리스트 순서 = 좌석 순서" 로직은 이 메서드만으로 계속 정상 동작한다.
+    public void addPlayer(Player player, int seatIndex) {
+        if (seatIndex < 0 || seatIndex >= MAX_PLAYERS) {
+            throw new InvalidActionException("좌석 번호가 올바르지 않습니다.");
+        }
+        if (isSeatTaken(seatIndex)) {
+            throw new GameStateException("이미 다른 사람이 앉아있는 자리입니다.");
         }
         // 게스트(accountUserId == null)는 중복 체크 대상이 아니다 — 같은 로그인 계정이 다른 브라우저/탭
         // 에서 또 입장해서 자기 자신과 마주 앉는(멀티어카운팅) 것만 막는다.
@@ -136,7 +196,57 @@ public class Room {
                 && players.stream().anyMatch(p -> player.getAccountUserId().equals(p.getAccountUserId()))) {
             throw new GameStateException("이미 이 계정으로 참가 중입니다.");
         }
+        boolean firstPlayer = players.isEmpty();
+        player.setSeatIndex(seatIndex);
         players.add(player);
+        resortSeatsPreservingButton();
+        if (firstPlayer) {
+            ownerId = player.getId();
+        }
+    }
+
+    // 이미 앉아있는 플레이어가 다른 빈 좌석으로 옮긴다. 핸드 진행 중 제한/연타 방지 등 정책 판단은
+    // GameEngine.requestSeatMove()가 먼저 하고, 여기서는 순수하게 "그 자리가 비어있는지"만 본다.
+    public void moveSeat(String playerId, int newSeatIndex) {
+        if (newSeatIndex < 0 || newSeatIndex >= MAX_PLAYERS) {
+            throw new InvalidActionException("좌석 번호가 올바르지 않습니다.");
+        }
+        Player player = findPlayer(playerId);
+        if (player.getSeatIndex() == newSeatIndex) {
+            return;
+        }
+        if (isSeatTaken(newSeatIndex)) {
+            throw new GameStateException("이미 다른 사람이 앉아있는 자리입니다.");
+        }
+        player.setSeatIndex(newSeatIndex);
+        player.markSeatChanged();
+        resortSeatsPreservingButton();
+    }
+
+    public boolean isSeatTaken(int seatIndex) {
+        return players.stream().anyMatch(p -> p.getSeatIndex() == seatIndex);
+    }
+
+    private int nextFreeSeatIndex() {
+        for (int i = 0; i < MAX_PLAYERS; i++) {
+            if (!isSeatTaken(i)) {
+                return i;
+            }
+        }
+        throw new GameStateException("테이블 정원(" + MAX_PLAYERS + "명)이 가득 찼습니다.");
+    }
+
+    // players를 seatIndex 오름차순으로 다시 정렬한다. dealerButtonPosition은 리스트 인덱스 기준이라
+    // 정렬로 순서가 바뀌면 엉뚱한 사람을 가리킬 수 있다 — removeLeavingPlayers()와 같은 패턴으로,
+    // 정렬 전에 "버튼을 쥔 사람(객체)"을 기억해뒀다가 정렬 후 그 사람의 새 인덱스로 보정한다.
+    private void resortSeatsPreservingButton() {
+        Player buttonHolder = (dealerButtonPosition >= 0 && dealerButtonPosition < players.size())
+                ? players.get(dealerButtonPosition)
+                : null;
+        players.sort(Comparator.comparingInt(Player::getSeatIndex));
+        if (buttonHolder != null) {
+            dealerButtonPosition = players.indexOf(buttonHolder);
+        }
     }
 
     // 딜러 버튼을 다음 좌석(players 리스트 순서 기준)으로 이동한다. 파산(BUSTED)한 좌석은
@@ -169,12 +279,27 @@ public class Room {
         Player buttonHolder = (dealerButtonPosition >= 0 && dealerButtonPosition < players.size())
                 ? players.get(dealerButtonPosition)
                 : null;
+        boolean ownerLeaving = ownerId != null
+                && players.stream().anyMatch(p -> p.isLeaving() && ownerId.equals(p.getId()));
 
         players.removeIf(Player::isLeaving);
 
         if (players.isEmpty()) {
             dealerButtonPosition = -1;
-        } else if (buttonHolder != null && players.contains(buttonHolder)) {
+            ownerId = null;
+            return;
+        }
+
+        if (ownerLeaving) {
+            // 남은 사람 중 가장 먼저 입장한 사람(joinedAtMillis 최솟값)에게 승계. 리스트 순서는
+            // 이제 좌석 번호 순서라 입장 순서와 다를 수 있어(자리를 옮기면 순서가 바뀜), 더 이상
+            // "리스트 맨 앞"으로 판단할 수 없다.
+            ownerId = players.stream().min(Comparator.comparingLong(Player::getJoinedAtMillis))
+                    .map(Player::getId)
+                    .orElse(null);
+        }
+
+        if (buttonHolder != null && players.contains(buttonHolder)) {
             dealerButtonPosition = players.indexOf(buttonHolder);
         } else {
             // 버튼을 쥐고 있던 사람 본인이 나간 경우 — 정확히 "다음 버튼이 누구여야 하는지"까지
@@ -212,6 +337,11 @@ public class Room {
         headsUpDeciderPlayerId = null;
         gameOverWinnerId = null;
         gameOverWinnerNickname = null;
+        anteCollectedThisHand = 0;
+        handConcludedAtMillis = 0;
+        // 블라인드 상승/앤티도 시작 단계로 되돌린다.
+        handsSinceBlindReset = 0;
+        applyBlindLevel();
     }
 
     public Player findPlayer(String playerId) {
@@ -238,7 +368,7 @@ public class Room {
     }
 
     public int getMaxPlayers() {
-        return maxPlayers;
+        return MAX_PLAYERS;
     }
 
     public List<Card> getCommunityCards() {
@@ -331,5 +461,100 @@ public class Room {
 
     public void setGameOverWinnerNickname(String gameOverWinnerNickname) {
         this.gameOverWinnerNickname = gameOverWinnerNickname;
+    }
+
+    // 다음 핸드 번호를 하나 소모해서 반환한다. GameEngine.onHandConcluded()가 핸드 히스토리 항목을
+    // 만들 때 한 번만 호출한다.
+    public int nextHandNumber() {
+        return ++handCounter;
+    }
+
+    // 최신 항목이 맨 앞에 오도록 추가하고, MAX_HAND_HISTORY를 넘으면 가장 오래된 것부터 버린다.
+    public void addHandHistoryEntry(HandHistoryEntry entry) {
+        handHistory.addFirst(entry);
+        while (handHistory.size() > MAX_HAND_HISTORY) {
+            handHistory.removeLast();
+        }
+    }
+
+    public List<HandHistoryEntry> getHandHistory() {
+        return List.copyOf(handHistory);
+    }
+
+    public int getAnte() {
+        return ante;
+    }
+
+    // GameEngine.postBlinds()가 앤티를 걷을 때마다 호출한다 — 실제로 낸 금액(숏스택이면 명목
+    // 앤티보다 적을 수 있음)을 누적한다.
+    public void addAnteCollected(int amount) {
+        anteCollectedThisHand += amount;
+    }
+
+    public int getAnteCollectedThisHand() {
+        return anteCollectedThisHand;
+    }
+
+    // 새 핸드가 시작될 때(GameEngine.startHand()) 호출한다 — 이전 핸드에서 걷힌 앤티가 이번
+    // 핸드의 팟 계산에 섞이지 않도록 리셋한다.
+    public void resetAnteCollected() {
+        anteCollectedThisHand = 0;
+    }
+
+    // 핸드가 하나 끝날 때마다 GameEngine.onHandConcluded()가 호출한다 — 다음 핸드의 블라인드 레벨
+    // 계산에 반영된다(레벨 자체는 applyBlindLevel()이 실제로 적용).
+    public void recordHandCompletedForBlindLevel() {
+        handsSinceBlindReset++;
+    }
+
+    // 핸드가 하나 끝날 때마다 GameEngine.onHandConcluded()가 호출한다.
+    public void markHandConcluded() {
+        handConcludedAtMillis = System.currentTimeMillis();
+    }
+
+    public long getHandConcludedAtMillis() {
+        return handConcludedAtMillis;
+    }
+
+    // handsSinceBlindReset 기준으로 현재 레벨을 계산해서 bigBlind/smallBlind/ante에 반영한다.
+    // GameEngine.startHand()가 블라인드를 걷기 직전에 호출하고, resetForRematch()도 리셋 직후
+    // 바로 호출해서(다음 핸드를 기다리는 15초 동안도) 화면에 시작 단계 값이 즉시 보이게 한다.
+    public void applyBlindLevel() {
+        int levelIndex = currentBlindLevelIndex();
+        int newBigBlind = bigBlindForLevelIndex(levelIndex);
+        this.bigBlind = newBigBlind;
+        this.smallBlind = newBigBlind / 2;
+        this.ante = levelIndex >= ANTE_START_LEVEL_INDEX ? newBigBlind : 0;
+    }
+
+    // 1부터 시작하는 현재 블라인드 레벨 번호(화면 표시용) — applyBlindLevel()이 실제로 적용하는
+    // 0-based 인덱스에 +1만 한 값이다.
+    public int getCurrentBlindLevel() {
+        return currentBlindLevelIndex() + 1;
+    }
+
+    public int getHandsSinceBlindReset() {
+        return handsSinceBlindReset;
+    }
+
+    // 전체 블라인드 구조표(고정 6단계) — 지금 몇 판째인지와 무관하게 항상 같은 값을 돌려준다.
+    // 프론트의 "블라인드 구조" 패널이 레벨별 스몰/빅블라인드/앤티를 한 번에 보여주는 데 쓴다.
+    public List<BlindLevelInfo> getBlindStructure() {
+        List<BlindLevelInfo> levels = new ArrayList<>();
+        for (int i = 0; i < BLIND_LEVEL_MULTIPLIERS.length; i++) {
+            int levelBigBlind = bigBlindForLevelIndex(i);
+            int levelAnte = i >= ANTE_START_LEVEL_INDEX ? levelBigBlind : 0;
+            levels.add(new BlindLevelInfo(i + 1, levelBigBlind / 2, levelBigBlind, levelAnte));
+        }
+        return levels;
+    }
+
+    private int currentBlindLevelIndex() {
+        return Math.min(handsSinceBlindReset / HANDS_PER_LEVEL, BLIND_LEVEL_MULTIPLIERS.length - 1);
+    }
+
+    // 빅블라인드 금액은 BET_UNIT의 배수여야 하므로, 배율을 곱한 뒤 가장 가까운 단위로 반올림한다.
+    private int bigBlindForLevelIndex(int levelIndex) {
+        return Math.round((float) (baseBigBlind * BLIND_LEVEL_MULTIPLIERS[levelIndex]) / BET_UNIT) * BET_UNIT;
     }
 }

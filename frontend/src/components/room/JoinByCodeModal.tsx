@@ -6,10 +6,10 @@ interface JoinByCodeModalProps {
   onClose: () => void;
 }
 
-// 방 코드를 직접 입력해서 바로 입장한다 — 비공개방이라도 비밀번호를 묻지 않는다
-// (roomCode를 안다는 것 자체를 초대로 간주한다, joinByCode 참고).
+// 방 코드를 직접 입력해서 관전을 시작한다(빈 좌석을 클릭해야 실제로 앉는다) — 비공개방이라도
+// 비밀번호를 묻지 않는다(roomCode를 안다는 것 자체를 초대로 간주한다, spectateByCode 참고).
 export function JoinByCodeModal({ onClose }: JoinByCodeModalProps) {
-  const { joinByCode } = useRoom();
+  const { spectateByCode } = useRoom();
   const [code, setCode] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -21,7 +21,7 @@ export function JoinByCodeModal({ onClose }: JoinByCodeModalProps) {
     }
     setSubmitting(true);
     try {
-      await joinByCode(trimmed);
+      await spectateByCode(trimmed);
     } finally {
       setSubmitting(false);
       onClose();

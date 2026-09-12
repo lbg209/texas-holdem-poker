@@ -2,27 +2,29 @@ import type { PlayerView } from '../types/room';
 import { computeSeatPositions } from '../components/table/computeSeatPositions';
 import type { SeatPosition } from '../components/table/computeSeatPositions';
 
+// 고정 좌석 수 — SeatLayout과 동일(Room.MAX_PLAYERS와 일치). 현재 인원수가 아니라 항상 이 값
+// 기준으로 배치한다(고정 좌석제 — 빈자리도 자리를 차지한다).
+const SEAT_COUNT = 6;
+
 // SeatLayout과 동일한 회전 규칙(내 좌석을 항상 하단 고정)으로 특정 플레이어의 정보박스 좌표를
 // 계산한다. 칩 이동 애니메이션처럼 좌석 배치 바깥(테이블 중앙 등)에서 특정 플레이어의 좌표가
-// 필요할 때 쓴다.
+// 필요할 때 쓴다. 회전 기준은 리스트 순서가 아니라 물리적 좌석 번호(seatIndex)다 — 빈자리가
+// 끼어 있어도 좌석 배치가 SeatLayout과 항상 일치해야 하기 때문.
 export function getRotatedSeatPosition(
   players: PlayerView[],
   myPlayerId: string | null,
   playerId: string,
 ): SeatPosition | null {
-  const count = players.length;
-  if (count === 0) {
+  const player = players.find((p) => p.id === playerId);
+  if (!player) {
     return null;
   }
 
-  const positions = computeSeatPositions(count);
-  const myIndex = players.findIndex((p) => p.id === myPlayerId);
-  const i = players.findIndex((p) => p.id === playerId);
-  if (i === -1) {
-    return null;
-  }
-
-  const rotatedIndex = myIndex === -1 ? i : (i - myIndex + count) % count;
+  const positions = computeSeatPositions(SEAT_COUNT);
+  const me = players.find((p) => p.id === myPlayerId);
+  // 아직 자리에 앉지 않은 관전자 시점에서는 회전하지 않고(0번 좌석이 하단) 그대로 보여준다.
+  const mySeatIndex = me?.seatIndex ?? 0;
+  const rotatedIndex = (player.seatIndex - mySeatIndex + SEAT_COUNT) % SEAT_COUNT;
   return positions[rotatedIndex] ?? null;
 }
 

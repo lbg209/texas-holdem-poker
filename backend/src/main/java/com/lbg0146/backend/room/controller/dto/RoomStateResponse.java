@@ -34,6 +34,15 @@ public record RoomStateResponse(
         int smallBlind,
         int bigBlind,
         int maxPlayers,
+        // 레벨 1부터 계속 걷는 앤티(빅블라인드 앤티 방식 — 빅블라인드 자리에 앉은 사람만 혼자
+        // 냄). 레벨이 오르면 그 레벨 빅블라인드를 그대로 따라간다.
+        int ante,
+        // 1부터 시작하는 현재 블라인드 레벨 번호, 블라인드 리셋(방 시작/GAME OVER 리매치) 이후
+        // 지금까지 끝난 핸드 수, 전체 블라인드 구조표(고정 6단계, 몇 판째인지와 무관하게 항상 동일).
+        // "블라인드 구조" 패널 표시용.
+        int currentBlindLevel,
+        int handsSinceBlindReset,
+        List<BlindLevelView> blindStructure,
         // 방 정체성(로비/좌측 정보 패널 표시용). 비밀번호는 절대 포함하지 않는다.
         String roomCode,
         String name,

@@ -6,7 +6,9 @@ import {
   getRoomState,
   joinRoom as joinRoomApi,
   joinRoomByCode as joinRoomByCodeApi,
+  kickPlayer as kickPlayerApi,
   listRooms as listRoomsApi,
+  moveSeat as moveSeatApi,
   requestLeave,
   revealFoldWinHand,
   setReady,
@@ -15,6 +17,7 @@ import {
 import { login as loginApi } from '../api/authApi';
 import { clearStoredPlayerId, getStoredPlayerId, storePlayerId } from './playerIdStorage';
 import { clearStoredRoomCode, getStoredRoomCode, storeRoomCode } from './roomCodeStorage';
+import { clearStoredGuestNickname, getStoredGuestNickname, storeGuestNickname } from './guestNicknameStorage';
 import { useRoomSocket } from '../ws/useRoomSocket';
 import type { ConnectionStatus, ServerMessage } from '../ws/useRoomSocket';
 import type { PlayerActionType, RoomStateResponse, RoomSummaryView } from '../types/room';
@@ -42,6 +45,10 @@ interface RoomState {
   error: string | null;
   // 저장된 roomCode+playerId를 GET /api/rooms/{roomCode}로 검증하는 동안(true) 화면이 잠깐 보이지 않게 한다.
   isVerifying: boolean;
+  // 고정 좌석제 — 빈자리를 클릭해서 "입장"할 때 실제로 써야 하는 비밀번호/경로를 스펙테이팅
+  // 중에도 기억해둔다(좌석 클릭 시점에야 실제 입장 API를 호출하므로). 이미 앉은 뒤로는 둘 다 의미 없다.
+  pendingJoinPassword: string | null;
+  pendingJoinByCode: boolean;
 }
 
 type Action =
@@ -51,6 +58,7 @@ type Action =
   | { type: 'ROOM_LIST_RECEIVED'; payload: RoomSummaryView[] }
   | { type: 'ROOM_DETAIL_SELECTED'; payload: RoomStateResponse }
   | { type: 'ROOM_DETAIL_CLEARED' }
+  | { type: 'SPECTATING_ROOM'; payload: { roomCode: string; password?: string; byCode?: boolean } }
   | { type: 'JOINED_ROOM'; payload: { roomCode: string; playerId: string } }
   | { type: 'ROOM_STATE_RECEIVED'; payload: RoomStateResponse }
   | { type: 'LEFT_ROOM' }
@@ -87,6 +95,17 @@ function reducer(state: RoomState, action: Action): RoomState {
       return { ...state, selectedRoomDetail: action.payload, error: null };
     case 'ROOM_DETAIL_CLEARED':
       return { ...state, selectedRoomDetail: null };
+    case 'SPECTATING_ROOM':
+      return {
+        ...state,
+        roomCode: action.payload.roomCode,
+        myPlayerId: null,
+        selectedRoomDetail: null,
+        screen: 'table',
+        pendingJoinPassword: action.payload.password ?? null,
+        pendingJoinByCode: action.payload.byCode ?? false,
+        error: null,
+      };
     case 'JOINED_ROOM':
       return {
         ...state,
@@ -94,12 +113,23 @@ function reducer(state: RoomState, action: Action): RoomState {
         myPlayerId: action.payload.playerId,
         selectedRoomDetail: null,
         screen: 'table',
+        pendingJoinPassword: null,
+        pendingJoinByCode: false,
         error: null,
       };
     case 'ROOM_STATE_RECEIVED':
       return { ...state, roomState: action.payload, isVerifying: false, error: null };
     case 'LEFT_ROOM':
-      return { ...state, roomCode: null, myPlayerId: null, roomState: null, screen: 'lobby', isVerifying: false };
+      return {
+        ...state,
+        roomCode: null,
+        myPlayerId: null,
+        roomState: null,
+        screen: 'lobby',
+        isVerifying: false,
+        pendingJoinPassword: null,
+        pendingJoinByCode: false,
+      };
     case 'VERIFY_DONE_NO_SESSION':
       return { ...state, isVerifying: false };
     case 'ERROR_OCCURRED':
@@ -131,19 +161,25 @@ interface RoomContextValue {
     password: string | undefined,
     startingChips: number,
     bigBlind: number,
-    maxPlayers: number,
   ) => Promise<void>;
   selectRoom: (roomCode: string) => Promise<void>;
   clearSelectedRoom: () => void;
-  joinSelectedRoom: (password?: string) => Promise<void>;
-  joinByCode: (roomCode: string) => Promise<void>;
+  // 고정 좌석제 — 로비에서 "입장"을 누르면 바로 앉지 않고 먼저 관전자로 테이블을 보여준다.
+  // 실제 입장은 claimSeat(빈 좌석 클릭)에서 일어난다.
+  spectateSelectedRoom: (password?: string) => void;
+  spectateByCode: (roomCode: string) => Promise<void>;
+  leaveSpectating: () => void;
+  claimSeat: (seatIndex: number) => Promise<void>;
+  moveSeat: (seatIndex: number) => Promise<void>;
   startNewHand: () => Promise<void>;
   toggleReady: (ready: boolean) => Promise<void>;
   toggleLeave: (leaving: boolean) => Promise<void>;
+  kickPlayer: (targetId: string) => Promise<void>;
   revealHand: () => Promise<void>;
   decideReveal: (reveal: boolean) => Promise<void>;
   sendAction: (action: PlayerActionType, amount: number) => void;
   reconnect: () => void;
+  refreshState: () => Promise<void>;
   clearError: () => void;
 }
 
@@ -152,7 +188,9 @@ const RoomContext = createContext<RoomContextValue | null>(null);
 export function RoomProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(reducer, {
     screen: 'auth',
-    guestNickname: null,
+    // 새로고침 직후에도(특히 이미 앉은 좌석을 복원하는 케이스) 나중에 다른 방에 새로 입장할 때
+    // 다시 쓸 수 있도록 sessionStorage에서 복원한다 — 비어 있어도(진짜 첫 방문) null이라 문제 없다.
+    guestNickname: getStoredGuestNickname(),
     authToken: null,
     loggedInNickname: null,
     roomCode: null,
@@ -162,6 +200,8 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     roomState: null,
     error: null,
     isVerifying: Boolean(getStoredRoomCode() && getStoredPlayerId()),
+    pendingJoinPassword: null,
+    pendingJoinByCode: false,
   });
 
   // 마운트 시 저장된 roomCode+playerId를 "그대로 신뢰"하지 않고, GET /api/rooms/{roomCode}로 서버에
@@ -235,6 +275,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   const { displayState, activeVisualEvent, dealProgress } = useTableAnimationQueue(state.roomState);
 
   const enterLobbyAsGuest = (nickname: string) => {
+    storeGuestNickname(nickname);
     dispatch({ type: 'GUEST_IDENTITY_SET', payload: { nickname } });
   };
 
@@ -251,6 +292,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   // 별도 API는 없다(AuthService가 메모리 토큰만 관리하며 서버 재시작 시 어차피 전부 로그아웃됨).
   // 클라이언트 쪽 식별 정보만 지우고 로그인/게스트 화면으로 돌아간다.
   const logout = () => {
+    clearStoredGuestNickname();
     dispatch({ type: 'LOGGED_OUT' });
   };
 
@@ -272,8 +314,9 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
   };
 
-  // 비밀번호를 확인하는 일반 입장 — createNewRoom(방 만들면 바로 입장)과
-  // joinSelectedRoom(로비에서 골라서 입장)이 공유한다.
+  // 방 만들기 직후 전용 — 방금 만든(아무도 없는) 방이라 굳이 좌석을 고를 필요가 없으므로, 빈 좌석
+  // 중 가장 낮은 번호(항상 0번)에 바로 앉는다. 로비에서 고른 방은 대신 spectateSelectedRoom으로
+  // 먼저 관전하다가 claimSeat로 실제 좌석을 고른다.
   const joinAndEnter = async (roomCode: string, password?: string) => {
     const { playerId } = await joinRoomApi(roomCode, state.guestNickname ?? undefined, state.authToken ?? undefined, password);
     await completeJoin(roomCode, playerId);
@@ -285,10 +328,9 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     password: string | undefined,
     startingChips: number,
     bigBlind: number,
-    maxPlayers: number,
   ) => {
     try {
-      const { roomCode } = await createRoomApi(name, isPrivate, password, startingChips, bigBlind, maxPlayers);
+      const { roomCode } = await createRoomApi(name, isPrivate, password, startingChips, bigBlind);
       // 만들자마자 바로 입장한다 — 로비로 돌아가서 다시 클릭할 필요가 없다.
       await joinAndEnter(roomCode, isPrivate ? password : undefined);
     } catch (e) {
@@ -307,23 +349,63 @@ export function RoomProvider({ children }: { children: ReactNode }) {
 
   const clearSelectedRoom = () => dispatch({ type: 'ROOM_DETAIL_CLEARED' });
 
-  const joinSelectedRoom = async (password?: string) => {
+  // 로비에서 고른 방에 "입장"을 누르면 바로 앉지 않고, 먼저 관전자로 테이블을 연다(좌석 클릭으로
+  // 실제로 앉기 전까지). 비밀번호는 나중에 claimSeat가 호출될 때 쓰도록 기억해둔다.
+  const spectateSelectedRoom = (password?: string) => {
     const detail = state.selectedRoomDetail;
     if (!detail) {
       return;
     }
+    dispatch({ type: 'SPECTATING_ROOM', payload: { roomCode: detail.roomCode, password } });
+  };
+
+  // "코드로 입장" — roomCode를 직접 입력해서 관전을 시작한다(비공개방이라도 비밀번호를 묻지 않는
+  // 경로이므로 claimSeat 시점에도 비밀번호가 필요 없다). 존재하지 않는 코드는 여기서 바로 에러로 안내한다.
+  const spectateByCode = async (roomCode: string) => {
     try {
-      await joinAndEnter(detail.roomCode, password);
+      await getRoomState(roomCode, null);
+      dispatch({ type: 'SPECTATING_ROOM', payload: { roomCode, byCode: true } });
     } catch (e) {
       dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
     }
   };
 
-  // "코드로 입장" — roomCode를 직접 입력해서 들어온다. 비공개방이라도 비밀번호를 묻지 않는다.
-  const joinByCode = async (roomCode: string) => {
+  // 아직 좌석을 고르지 않은 관전 상태에서 로비로 돌아간다.
+  const leaveSpectating = () => {
+    dispatch({ type: 'LEFT_ROOM' });
+  };
+
+  // 빈 좌석을 클릭해서 실제로 입장한다. spectateSelectedRoom/spectateByCode가 기억해둔
+  // 비밀번호/경로에 따라 비밀번호 검사 있는 API와 없는 API("코드로 입장")를 갈라 호출한다.
+  const claimSeat = async (seatIndex: number) => {
+    if (!state.roomCode) {
+      return;
+    }
     try {
-      const { playerId } = await joinRoomByCodeApi(roomCode, state.guestNickname ?? undefined, state.authToken ?? undefined);
-      await completeJoin(roomCode, playerId);
+      const { playerId } = state.pendingJoinByCode
+        ? await joinRoomByCodeApi(state.roomCode, state.guestNickname ?? undefined, state.authToken ?? undefined, seatIndex)
+        : await joinRoomApi(
+            state.roomCode,
+            state.guestNickname ?? undefined,
+            state.authToken ?? undefined,
+            state.pendingJoinPassword ?? undefined,
+            seatIndex,
+          );
+      await completeJoin(state.roomCode, playerId);
+    } catch (e) {
+      dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
+    }
+  };
+
+  // 이미 앉아있는 플레이어가 다른 빈 좌석으로 옮긴다. 핸드 진행 중이거나 너무 빠르게 연속으로
+  // 옮기려 하면 서버가 거부한다(SeatLayout이 UI에서도 미리 막아주지만, 최종 검증은 서버 책임).
+  const moveSeat = async (seatIndex: number) => {
+    if (!state.myPlayerId || !state.roomCode) {
+      return;
+    }
+    try {
+      const roomState = await moveSeatApi(state.roomCode, state.myPlayerId, seatIndex);
+      dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
     } catch (e) {
       dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
     }
@@ -374,6 +456,20 @@ export function RoomProvider({ children }: { children: ReactNode }) {
     }
   };
 
+  // 방장이 레디 안 한 플레이어를 강퇴한다. 실패(핸드 진행 중/레디함/유예 시간 안 지남)해도 남은
+  // 시간 같은 세부 사항은 안내하지 않고, 서버가 보낸 에러 메시지만 그대로 보여준다.
+  const kickPlayer = async (targetId: string) => {
+    if (!state.myPlayerId || !state.roomCode) {
+      return;
+    }
+    try {
+      const roomState = await kickPlayerApi(state.roomCode, state.myPlayerId, targetId);
+      dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
+    } catch (e) {
+      dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
+    }
+  };
+
   const revealHand = async () => {
     if (!state.myPlayerId || !state.roomCode) {
       return;
@@ -400,6 +496,19 @@ export function RoomProvider({ children }: { children: ReactNode }) {
 
   const clearError = () => dispatch({ type: 'CLEAR_ERROR' });
 
+  // 화면의 "상태 새로고침" 버튼 — WS가 끊겼거나 최신 상태가 의심스러울 때 수동으로 다시 받아온다.
+  const refreshState = async () => {
+    if (!state.roomCode) {
+      return;
+    }
+    try {
+      const roomState = await getRoomState(state.roomCode, state.myPlayerId);
+      dispatch({ type: 'ROOM_STATE_RECEIVED', payload: roomState });
+    } catch (e) {
+      dispatch({ type: 'ERROR_OCCURRED', payload: (e as Error).message });
+    }
+  };
+
   return (
     <RoomContext.Provider
       value={{
@@ -411,15 +520,20 @@ export function RoomProvider({ children }: { children: ReactNode }) {
         createNewRoom,
         selectRoom,
         clearSelectedRoom,
-        joinSelectedRoom,
-        joinByCode,
+        spectateSelectedRoom,
+        spectateByCode,
+        leaveSpectating,
+        claimSeat,
+        moveSeat,
         startNewHand,
         toggleReady,
         toggleLeave,
+        kickPlayer,
         revealHand,
         decideReveal,
         sendAction,
         reconnect,
+        refreshState,
         clearError,
       }}
     >

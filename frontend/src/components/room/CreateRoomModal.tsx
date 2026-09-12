@@ -6,10 +6,8 @@ interface CreateRoomModalProps {
   onClose: () => void;
 }
 
-const DEFAULT_STARTING_CHIPS = 30_000;
+const DEFAULT_STARTING_CHIPS = 50_000;
 const DEFAULT_BIG_BLIND = 200;
-const DEFAULT_MAX_PLAYERS = 6;
-const MAX_PLAYER_OPTIONS = [2, 3, 4, 5, 6];
 
 export function CreateRoomModal({ onClose }: CreateRoomModalProps) {
   const { createNewRoom } = useRoom();
@@ -18,7 +16,6 @@ export function CreateRoomModal({ onClose }: CreateRoomModalProps) {
   const [password, setPassword] = useState('');
   const [startingChips, setStartingChips] = useState(DEFAULT_STARTING_CHIPS);
   const [bigBlind, setBigBlind] = useState(DEFAULT_BIG_BLIND);
-  const [maxPlayers, setMaxPlayers] = useState(DEFAULT_MAX_PLAYERS);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -35,7 +32,7 @@ export function CreateRoomModal({ onClose }: CreateRoomModalProps) {
     setError(null);
     setSubmitting(true);
     try {
-      await createNewRoom(name.trim(), isPrivate, isPrivate ? password : undefined, startingChips, bigBlind, maxPlayers);
+      await createNewRoom(name.trim(), isPrivate, isPrivate ? password : undefined, startingChips, bigBlind);
       onClose();
     } catch (err) {
       setError((err as Error).message);
@@ -112,20 +109,6 @@ export function CreateRoomModal({ onClose }: CreateRoomModalProps) {
               onChange={(e) => setBigBlind(Number(e.target.value))}
             />
             <span className="text-xs text-slate-500">스몰블라인드는 자동으로 절반({bigBlind / 2})으로 설정돼요.</span>
-          </label>
-          <label className="flex flex-col gap-1 text-sm text-slate-300">
-            최대 인원
-            <select
-              className="rounded bg-slate-700 px-3 py-2 outline-none"
-              value={maxPlayers}
-              onChange={(e) => setMaxPlayers(Number(e.target.value))}
-            >
-              {MAX_PLAYER_OPTIONS.map((n) => (
-                <option key={n} value={n}>
-                  {n}명
-                </option>
-              ))}
-            </select>
           </label>
           {error && <p className="text-sm text-red-400">{error}</p>}
           <button

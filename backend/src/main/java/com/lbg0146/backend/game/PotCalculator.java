@@ -14,10 +14,18 @@ public class PotCalculator {
     private PotCalculator() {
     }
 
+    public static List<Pot> calculate(List<Player> players) {
+        return calculate(players, 0);
+    }
+
     // 핸드 종료 시점에 각 플레이어의 totalHandContribution을 기준으로 메인팟/사이드팟을 계산한다.
     // 폴드한 플레이어의 기여금도 팟 금액에는 포함되지만, 그 플레이어는 어떤 팟도 가져갈 자격이 없다.
     // 올인한 플레이어는 자신이 기여한 금액 수준까지의 팟에서만 승리할 수 있다.
-    public static List<Pot> calculate(List<Player> players) {
+    // deadMoney(앤티 등, 특정 플레이어 소유가 아닌 돈)는 항상 폴드 안 한 전원이 경쟁하는 메인팟
+    // (eligiblePlayerIds가 가장 넓은, 즉 목록의 첫 번째 팟)에 통째로 더한다 — 개별 플레이어의
+    // totalHandContribution 수준과 무관하게 전원이 경쟁하는 돈이라, 다른 사이드팟 계산에 섞이면
+    // 안 된다(섞이면 그 돈을 낸 사람만 가져가는 가짜 사이드팟이 생긴다).
+    public static List<Pot> calculate(List<Player> players, int deadMoney) {
         List<Player> contributors = players.stream()
                 .filter(p -> p.getTotalHandContribution() > 0)
                 .toList();
@@ -48,6 +56,11 @@ public class PotCalculator {
                 pots.add(new Pot(increment * reachedThisLevel.size(), eligiblePlayerIds));
             }
             previousLevel = level;
+        }
+
+        if (deadMoney > 0 && !pots.isEmpty()) {
+            Pot mainPot = pots.get(0);
+            pots.set(0, new Pot(mainPot.amount() + deadMoney, mainPot.eligiblePlayerIds()));
         }
         return pots;
     }

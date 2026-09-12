@@ -1,8 +1,8 @@
 import { useState } from 'react';
 import { useRoom } from '../../state/RoomContext';
 
-// 좌측 상단의 작은 on/off 토글 — 켜면 방 제목/시작 칩/빅블라인드/방 코드를 보여준다.
-// 방 코드를 다른 사람에게 공유할 때 쓴다.
+// 좌측 상단의 작은 on/off 토글(다른 토글과 한 행에 나란히 놓임, 배치는 App.tsx가 담당) — 켜면
+// 방 제목/시작 칩/빅블라인드/방 코드를 보여준다. 방 코드를 다른 사람에게 공유할 때 쓴다.
 export function RoomInfoToggle() {
   const { state } = useRoom();
   const [open, setOpen] = useState(false);
@@ -13,7 +13,7 @@ export function RoomInfoToggle() {
   }
 
   return (
-    <div className="fixed left-4 top-4 z-20">
+    <div>
       <button
         className="rounded bg-slate-800/90 px-2 py-1 text-xs text-slate-300 shadow hover:bg-slate-700"
         onClick={() => setOpen((prev) => !prev)}
@@ -36,6 +36,14 @@ export function RoomInfoToggle() {
               <dt className="text-slate-500">블라인드</dt>
               <dd>{roomState.smallBlind.toLocaleString()} / {roomState.bigBlind.toLocaleString()}</dd>
             </div>
+            {/* 판 수 기준 블라인드 상승이 마지막 단계에 도달해야만 걷히므로, 그 전까지는 0이라 줄
+                자체를 안 보여준다. */}
+            {roomState.ante > 0 && (
+              <div className="flex justify-between">
+                <dt className="text-slate-500">앤티</dt>
+                <dd>{roomState.ante.toLocaleString()}</dd>
+              </div>
+            )}
           </dl>
         </div>
       )}

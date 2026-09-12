@@ -30,8 +30,8 @@ public class RoomManager {
     }
 
     // 방을 새로 만들고 roomCode를 반환한다. 비공개방(isPrivate=true)은 비밀번호가 필수다.
-    public String createRoom(String name, boolean isPrivate, String password, int startingChips, int bigBlind,
-            int maxPlayers) {
+    // 좌석 수는 더 이상 방마다 설정할 수 없다 — 항상 Room.MAX_PLAYERS(6석) 고정이다.
+    public String createRoom(String name, boolean isPrivate, String password, int startingChips, int bigBlind) {
         if (name == null || name.isBlank()) {
             throw new InvalidActionException("방 이름을 입력해주세요.");
         }
@@ -40,7 +40,7 @@ public class RoomManager {
         }
 
         Room room = new Room();
-        room.configure(startingChips, bigBlind, maxPlayers);
+        room.configure(startingChips, bigBlind);
         String roomCode = generateUniqueRoomCode();
         room.initIdentity(roomCode, name.trim(), isPrivate, isPrivate ? password : null);
 

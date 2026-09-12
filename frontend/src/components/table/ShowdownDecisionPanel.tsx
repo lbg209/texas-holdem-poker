@@ -1,5 +1,6 @@
 import { useRoom } from '../../state/RoomContext';
 import { useCountdownSeconds } from '../../lib/useCountdownSeconds';
+import { useShowBoard } from '../../lib/useShowBoard';
 
 // 백엔드 HeadsUpRevealTimerService.DECISION_TIME_LIMIT_SECONDS와 맞춘 값 — 진행바/색 전환에만 쓰인다.
 const DECISION_TIME_LIMIT_SECONDS = 8;
@@ -16,6 +17,9 @@ export function ShowdownDecisionPanel() {
   // ActionBar와 같은 이유로 displayState 기준 — 연출이 다 따라잡은 뒤에만 패널이 뜬다.
   const displayState = state.displayState;
   const secondsLeft = useCountdownSeconds(displayState?.headsUpRevealDeadlineAtMillis ?? null);
+  // PokerTable과 같은 기준 — 자동 진행이 멈춰 대기 화면으로 넘어간 뒤에는, 자원 공개 버튼도
+  // 이전 핸드의 잔여물이니 같이 사라져야 "방금 만든 방" 같은 깨끗한 화면이 된다.
+  const { showBoard } = useShowBoard(displayState);
   const myId = state.myPlayerId;
 
   if (!displayState || !myId) {
@@ -23,7 +27,8 @@ export function ShowdownDecisionPanel() {
   }
 
   const isHeadsUpDecider = displayState.headsUpDeciderPlayerId === myId;
-  const canRevealFoldWin = displayState.foldWinWinnerId === myId && !displayState.revealedPlayerIds.includes(myId);
+  const canRevealFoldWin =
+    showBoard && displayState.foldWinWinnerId === myId && !displayState.revealedPlayerIds.includes(myId);
   const isWaitingOnOpponentDecision =
     displayState.headsUpDeciderPlayerId !== null && displayState.headsUpDeciderPlayerId !== myId;
 

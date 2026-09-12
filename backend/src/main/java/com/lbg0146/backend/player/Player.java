@@ -38,6 +38,22 @@ public class Player {
     // 즉시 방에서 제거된다(GameEngine.requestLeave/removeLeavingPlayers 참고). 한 번 제거되면
     // Player 자체가 목록에서 사라지므로 이 플래그를 다시 초기화할 일은 없다.
     private boolean leaving;
+    // 마지막으로 "레디 안 함" 상태가 된 시각(ms). 방장 강퇴 가능 여부(일정 시간 이상 레디 안 함) 판단에
+    // 쓰인다. ready가 true가 되면 0으로 리셋되고(강퇴 대상 아님), false가 될 때마다(생성 직후 포함)
+    // 다시 그 시점으로 갱신된다.
+    private long notReadySince;
+    // 앉아있는 물리적 좌석 번호(0~Room.MAX_PLAYERS-1). Room.addPlayer()가 배정하고,
+    // Room.moveSeat()가 자리 이동 시 바꾼다 — Room.players 리스트는 항상 이 값 기준 오름차순으로
+    // 정렬된 상태를 유지해서, 버튼 이동/블라인드 순서 등 기존의 "리스트 순서 = 좌석 순서" 로직을
+    // 그대로 재사용할 수 있게 한다.
+    private int seatIndex = -1;
+    // 이 방에 처음 입장한 시각(ms). 방장 승계(가장 오래 앉아있는 사람) 판단 기준 — seatIndex와
+    // 달리 자리를 옮겨도 바뀌지 않는다(리스트 순서만으로는 더 이상 입장 순서를 알 수 없으므로 별도로
+    // 들고 있어야 한다).
+    private final long joinedAtMillis;
+    // 마지막으로 좌석을 옮긴 시각(ms). 너무 빠르게 연속으로 자리를 옮기는 것을 막는 데 쓰인다
+    // (GameEngine.requestSeatMove 참고). 기본값 0이라 첫 이동은 항상 허용된다.
+    private long lastSeatChangeAtMillis;
 
     public Player(String id, String nickname, int chips) {
         this(id, nickname, chips, null);
@@ -48,6 +64,23 @@ public class Player {
         this.nickname = nickname;
         this.chips = chips;
         this.accountUserId = accountUserId;
+        this.notReadySince = System.currentTimeMillis();
+        this.joinedAtMillis = System.currentTimeMillis();
+    }
+
+    // 앤티를 낸다 — commitChips와 달리 currentRoundBet에도 totalHandContribution에도 반영하지
+    // 않는다. 이 둘은 "베팅 스택 수준"을 나타내는 값이라(사이드팟 계산의 기준), 항상 딱 한 명(빅
+    // 블라인드 자리)만 내는 앤티를 섞으면 PotCalculator가 마치 그 사람만 더 많이 올인한 것처럼
+    // 오인해서, 그 사람만 가져가는 가짜 사이드팟을 만들어버린다(실사용 중 발견된 버그). 대신
+    // 실제로 낸 금액(숏스택이면 모자란 만큼만)을 반환하고, 호출 측(GameEngine)이 Room의 "이번
+    // 핸드 걷힌 앤티 총액"에 더해뒀다가 PotCalculator가 메인팟에 통째로 얹는다.
+    public int payAnte(int amount) {
+        int actual = Math.min(amount, chips);
+        chips -= actual;
+        if (chips == 0) {
+            status = PlayerStatus.ALL_IN;
+        }
+        return actual;
     }
 
     // 칩을 판에 넣는다. 칩이 요청 금액보다 적으면 가진 만큼만 내고(올인), 잔여 칩이 0이 되면
@@ -146,6 +179,12 @@ public class Player {
 
     public void setReady(boolean ready) {
         this.ready = ready;
+        this.notReadySince = ready ? 0 : System.currentTimeMillis();
+    }
+
+    // 레디 안 한 상태로 delayMillis 이상 지났는지 — 방장 강퇴 가능 여부 판단에 쓰인다(GameEngine.kickPlayer).
+    public boolean isKickEligible(long delayMillis) {
+        return !ready && System.currentTimeMillis() - notReadySince >= delayMillis;
     }
 
     public boolean isAutoFolded() {
@@ -162,5 +201,26 @@ public class Player {
 
     public void setLeaving(boolean leaving) {
         this.leaving = leaving;
+    }
+
+    public int getSeatIndex() {
+        return seatIndex;
+    }
+
+    public void setSeatIndex(int seatIndex) {
+        this.seatIndex = seatIndex;
+    }
+
+    public long getJoinedAtMillis() {
+        return joinedAtMillis;
+    }
+
+    // 레디 안 함(isKickEligible)과 동일한 패턴 — 좌석을 옮긴 지 delayMillis 이상 지났는지.
+    public boolean isSeatMoveEligible(long delayMillis) {
+        return System.currentTimeMillis() - lastSeatChangeAtMillis >= delayMillis;
+    }
+
+    public void markSeatChanged() {
+        this.lastSeatChangeAtMillis = System.currentTimeMillis();
     }
 }

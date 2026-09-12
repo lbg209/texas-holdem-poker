@@ -1,5 +1,6 @@
 import { useRoom } from '../../state/RoomContext';
 import { useCountdownSeconds } from '../../lib/useCountdownSeconds';
+import { SoundControl } from './SoundControl';
 
 const CONNECTION_LABEL: Record<string, string> = {
   idle: '대기',
@@ -10,9 +11,15 @@ const CONNECTION_LABEL: Record<string, string> = {
 };
 
 export function TableHeader() {
-  const { state, refreshState, toggleReady, toggleLeave, reconnect, clearError } = useRoom();
+  const { state, refreshState, toggleReady, toggleLeave, leaveSpectating, reconnect, clearError } = useRoom();
   const roomState = state.roomState;
-  const myNickname = roomState?.players.find((p) => p.id === state.myPlayerId)?.nickname;
+  // 아직 좌석을 고르지 않은 관전 상태(myPlayerId==null)라도, 로그인/게스트 단계에서 이미 알고
+  // 있는 내 닉네임을 그대로 보여준다 — 서버에 실제로 앉기 전까지는 "나"로만 표시되던 문제 수정.
+  const myNickname =
+    roomState?.players.find((p) => p.id === state.myPlayerId)?.nickname ??
+    state.loggedInNickname ??
+    state.guestNickname ??
+    undefined;
   // 게임 종료(생존자 1명) 여부/레디 상태/다음 핸드 자동시작 카운트다운 모두 연출 지연 없이 실제
   // 최신 상태(roomState) 기준으로 즉시 반영한다 — 애니메이션이 아직 재생 중이어도 실제 사실은
   // 이미 그렇기 때문(핸드 시작을 더 못 하거나, 곧 자동으로 다음 핸드가 시작되거나).
@@ -51,6 +58,7 @@ export function TableHeader() {
               [{state.myPlayerId.slice(0, 6)}]
             </span>
           )}
+          <SoundControl />
         </span>
         <div className="flex items-center gap-2">
           <span className="rounded bg-slate-700 px-2 py-1 text-xs">
@@ -64,7 +72,7 @@ export function TableHeader() {
           <button className="rounded bg-slate-700 px-3 py-1.5 text-sm" onClick={() => void refreshState()}>
             상태 새로고침
           </button>
-          {state.myPlayerId && (
+          {state.myPlayerId ? (
             <button
               className={`rounded px-3 py-1.5 text-sm ${
                 myLeaving ? 'bg-slate-600 hover:bg-slate-500' : 'bg-red-700 hover:bg-red-800'
@@ -73,8 +81,13 @@ export function TableHeader() {
             >
               {myLeaving ? '나가기 취소' : '나가기'}
             </button>
+          ) : (
+            // 아직 좌석을 고르지 않은 관전 상태 — 빈 자리를 클릭해야 실제로 앉는다.
+            <button className="rounded bg-slate-700 px-3 py-1.5 text-sm hover:bg-slate-600" onClick={leaveSpectating}>
+              로비로 돌아가기
+            </button>
           )}
-          {!gameOver && !myLeaving && contenders.length > 0 && (
+          {state.myPlayerId && !gameOver && !myLeaving && contenders.length > 0 && (
             <>
               <span className="text-xs text-slate-400">
                 준비 {readyCount}/{contenders.length}

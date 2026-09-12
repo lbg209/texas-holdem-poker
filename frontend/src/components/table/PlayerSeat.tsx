@@ -15,7 +15,9 @@ import { Card } from './Card';
 import { RevealCard } from './RevealCard';
 import { FlipCard } from './FlipCard';
 import { ChipStack } from './ChipStack';
+import { AllInBadge } from './AllInBadge';
 import { useCountdownSeconds } from '../../lib/useCountdownSeconds';
+import { SEAT_COLORS } from '../../lib/seatColors';
 
 // 이 초 이하로 남으면 카운트다운을 빨간색으로 강조한다.
 const URGENT_SECONDS_THRESHOLD = 10;
@@ -49,6 +51,16 @@ interface PlayerSeatProps {
   // displayState 기준(화면에 지금 그려지는 상태와 항상 같은 타이밍에 갱신됨) — 이 좌석이
   // isCurrentActor일 때만 실제로 표시에 쓰인다.
   turnDeadlineAtMillis: number | null;
+  // 보고 있는 나 자신이 방장인지 — 강퇴 버튼 노출 여부 판단에 쓰인다(이 좌석의 player.isOwner와는 별개).
+  amIOwner: boolean;
+  // 이번 핸드에 적용된 앤티 금액(0이면 이번 레벨엔 앤티 없음). 빅블라인드 자리(tablePosition==='BB')
+  // 만 실제로 앤티를 내므로, 그 좌석의 "-금액" 표시에만 더해서 보여준다 — 백엔드는 앤티를 일부러
+  // totalHandContribution에 안 섞어서(사이드팟 계산이 꼬이는 버그가 있었음) 그대로 쓰면 BB 좌석의
+  // "-금액"이 실제 칩 차감액보다 적게 보이는 문제가 있었다.
+  ante: number;
+  // 방장이 이 좌석 플레이어를 강퇴한다. 너무 일찍 시도하면(레디 안 한 지 3초가 안 지남) 서버가
+  // 거부하고 그 메시지가 화면 상단 에러 배너에 뜬다 — 여기서 남은 시간을 따로 보여주지 않는다.
+  onKick?: (targetId: string) => void;
 }
 
 // 액션 줄: FOLD/ALL-IN은 상태 기준(스트리트가 바뀌어도 유지), CHECK/CALL/BET/RAISE는
@@ -167,16 +179,24 @@ export function PlayerSeat({
   handEnded,
   dealtPlaceholderCount,
   turnDeadlineAtMillis,
+  amIOwner,
+  onKick,
+  ante,
 }: PlayerSeatProps) {
   const [hole0, hole1] = player.holeCards;
   const faceUp = player.holeCards.length > 0;
   const secondsLeft = useCountdownSeconds(isCurrentActor ? turnDeadlineAtMillis : null);
-  const actionLine = getActionLine(player);
+  const isBusted = player.status === 'BUSTED';
+  // BUSTED는 이번 핸드 한정이 아니라 계속 이어지는 실제 상태라 showCards와 무관하게 항상 보여준다.
+  // 그 외(FOLD/CHECK/CALL/BET/RAISE/ALL-IN)는 방금 끝난 핸드의 결과라, showCards가 꺼지면
+  // (자동 진행이 멈춰 대기 화면으로 넘어가면) 같이 사라져야 "방금 만든 방" 같은 화면이 된다.
+  const actionLine = showCards || isBusted ? getActionLine(player) : null;
   const handRankColor: HighlightColor | null =
-    showdownHand && showdownHand.handRank !== null && showdownHand.bestFive !== null
+    showCards && showdownHand && showdownHand.handRank !== null && showdownHand.bestFive !== null
       ? getHighlightColorForHandRank(showdownHand.handRank, showdownHand.bestFive)
       : null;
-  const isBusted = player.status === 'BUSTED';
+  // 승자 하이라이트(테두리 글로우/WINNER 배지)도 이번 핸드 한정 결과라 showCards를 따라간다.
+  const showWinnerHighlight = isWinner && showCards;
 
   // 파산한 좌석은 이번 핸드에 아예 참여하지 않으므로 카드를 아예 그리지 않는다 — 홀카드가
   // 항상 비어 있어(백엔드가 애초에 안 나눠줌) HoleCard의 "아직 안 왔으면 뒷면 표시" 기본 동작을
@@ -237,11 +257,16 @@ export function PlayerSeat({
         )
       );
 
-  // 핸드가 끝난 뒤(쇼다운 또는 폴드 종료)에만 이번 핸드의 손익을 +/-로 보여준다.
-  const showNetChange = handEnded && player.netChipChange !== 0;
+  // 핸드가 끝난 뒤(쇼다운 또는 폴드 종료)에만 이번 핸드의 손익을 +/-로 보여준다. 이것도 이번
+  // 핸드 한정 결과라 showCards가 꺼지면(대기 화면) 같이 사라진다.
+  const showNetChange = showCards && handEnded && player.netChipChange !== 0;
   // 이번 핸드 누적 베팅액은 정보박스의 별도 줄 대신, 중앙 팟의 "+금액" 표시와 같은 방식으로
   // 칩 스택 숫자 옆에 "-금액"으로 붙인다. 핸드가 끝나면(손익 +/-로 대체되므로) 더는 보여주지 않는다.
-  const showContribution = !handEnded && player.totalHandContribution > 0;
+  // 빅블라인드 자리(앤티를 실제로 내는 사람)는 totalHandContribution에 앤티를 더해서 보여준다 —
+  // 안 그러면 실제 칩 차감액(블라인드+앤티)보다 이 숫자가 적게 보여서 "왜 칩이 더 빠졌지?" 헷갈린다.
+  const isAntePayer = tablePosition === 'BB' && ante > 0;
+  const displayedContribution = player.totalHandContribution + (isAntePayer ? ante : 0);
+  const showContribution = !handEnded && displayedContribution > 0;
 
   // 보유칩 더미는 정보박스 옆(중앙 쪽)에 둔다. 좌석이 테이블 왼쪽(leftPercent<=50, 예: 10시
   // 방향)이면 정보박스 오른쪽(중앙 쪽)에, 오른쪽(1시 방향)이면 정보박스 왼쪽(중앙 쪽)에.
@@ -274,15 +299,22 @@ export function PlayerSeat({
                 ? // 파산: 폴드(단순 반투명)와 다르게, 회색조 + 붉은 빗금 균열 무늬 + 점선 테두리로
                   // "깨진" 느낌을 낸다 — 더는 이번 핸드에 존재하지 않는 좌석임을 한눈에 구분되게.
                   'grayscale border-2 border-dashed border-red-900/60 bg-slate-950/90 bg-[repeating-linear-gradient(135deg,rgba(127,29,29,0.35)_0px,rgba(127,29,29,0.35)_2px,transparent_2px,transparent_10px)] opacity-70'
-                : isWinner
+                : showWinnerHighlight
                   ? 'border-2 border-yellow-400 bg-gradient-to-b from-yellow-900/60 to-slate-900 shadow-[0_0_12px_rgba(250,204,21,0.6)]'
                   : isCurrentActor
                     ? 'border-2 border-emerald-400 bg-gradient-to-b from-slate-700 to-slate-900 shadow-emerald-400/40'
                     : 'border border-slate-600 bg-gradient-to-b from-slate-700/90 to-slate-900/90'
-            } ${player.status === 'FOLDED' ? 'opacity-50' : ''}`}
+            } ${showCards && player.status === 'FOLDED' ? 'opacity-50' : ''}`}
           >
             <span className={`font-medium ${isMe ? 'text-emerald-400' : 'text-slate-100'}`}>
+              {/* 좌석 번호 고정 색 — 닉네임이 같아도(중복 허용) 어느 자리인지로 구분할 수 있게 하는
+                  보조 표시. 자리를 옮기면 색도 그 좌석 번호를 따라간다. */}
+              <span
+                className={`mr-1 inline-block h-2 w-2 rounded-full ${SEAT_COLORS[player.seatIndex]}`}
+                title={`좌석 ${player.seatIndex + 1}`}
+              />
               {isChipLeader && <span title="칩리더">👑</span>}
+              {player.isOwner && <span title="방장">🎖️</span>}
               {player.nickname}
               {tablePosition && (
                 <span className="ml-1 rounded bg-slate-200 px-1 text-[10px] text-slate-900">{tablePosition}</span>
@@ -300,6 +332,18 @@ export function PlayerSeat({
                     READY
                   </span>
                 )
+              )}
+              {/* 방장 전용 강퇴 버튼: 본인 제외, 레디 안 한 사람에게만 노출. 너무 일찍 누르면 서버가
+                  거부하고 그 메시지가 상단 에러 배너에 뜬다 — 남은 유예 시간은 여기서 보여주지 않는다. */}
+              {amIOwner && !isMe && !player.leaving && !player.ready && onKick && (
+                <button
+                  type="button"
+                  className="ml-1 rounded bg-slate-600 px-1 text-[10px] text-white hover:bg-red-700"
+                  onClick={() => onKick(player.id)}
+                  title="레디 안 한 플레이어를 강퇴합니다"
+                >
+                  강퇴
+                </button>
               )}
             </span>
             {actionLine && (
@@ -323,10 +367,10 @@ export function PlayerSeat({
             )}
             {/* 헤즈업 쇼다운에서 이 사람이 아직 공개 전이거나 머크했으면(handRank가 없으면) 카드
                 내용 대신 실제 포커 용어로 표시한다. */}
-            {showdownHand && showdownHand.handRank === null && (
+            {showCards && showdownHand && showdownHand.handRank === null && (
               <span className="font-medium text-slate-400">MUCK</span>
             )}
-            {isWinner && <span className="font-bold text-yellow-400">WINNER</span>}
+            {showWinnerHighlight && <span className="font-bold text-yellow-400">WINNER</span>}
             {isCurrentActor && (
               <span className="font-semibold text-emerald-400">
                 턴
@@ -352,10 +396,27 @@ export function PlayerSeat({
         }}
       >
         <div className="flex flex-col items-center gap-1">
-          <ChipStack amount={player.chips} />
+          <div className="flex items-center gap-1">
+            <ChipStack amount={player.chips} />
+            {/* 실제 방송 중계처럼, 올인한 동안(이번 핸드가 끝날 때까지) 칩 스택 오른쪽에 계속 떠 있다. */}
+            {player.status === 'ALL_IN' && <AllInBadge />}
+          </div>
           <span className="text-sm font-semibold text-amber-200">
             {formatMoney(player.chips)}
-            {showContribution && <span className="text-red-400"> -{formatMoney(player.totalHandContribution)}</span>}
+            {showContribution && (
+              <span
+                className="text-red-400"
+                title={
+                  isAntePayer
+                    ? `블라인드/베팅 ${formatMoney(player.totalHandContribution)} + 앤티 ${formatMoney(ante)}`
+                    : undefined
+                }
+              >
+                {' '}
+                -{formatMoney(displayedContribution)}
+                {isAntePayer && <span className="ml-0.5 text-[9px] text-orange-300">(+앤티)</span>}
+              </span>
+            )}
           </span>
           {showNetChange && (
             <span className={`text-sm font-bold ${player.netChipChange > 0 ? 'text-sky-400' : 'text-red-500'}`}>

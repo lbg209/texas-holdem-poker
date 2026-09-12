@@ -8,7 +8,9 @@ import com.lbg0146.backend.exception.InvalidActionException;
 import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerAction;
 import com.lbg0146.backend.player.PlayerStatus;
+import com.lbg0146.backend.room.HandHistoryEntry;
 import com.lbg0146.backend.room.Phase;
+import com.lbg0146.backend.room.Pot;
 import com.lbg0146.backend.room.Room;
 import org.junit.jupiter.api.Test;
 
@@ -65,7 +67,7 @@ class GameEngineTest {
     void 방_설정을_바꾸면_핸드도_그_블라인드로_진행된다() {
         Room room = new Room();
         GameEngine engine = new GameEngine(room);
-        engine.configureRoom(50_000, 1000, 6); // 빅블라인드 1000 -> 스몰블라인드 500
+        engine.configureRoom(50_000, 1000); // 빅블라인드 1000 -> 스몰블라인드 500
         room.addPlayer(new Player("p1", "P1", room.getStartingChips()));
         room.addPlayer(new Player("p2", "P2", room.getStartingChips()));
 
@@ -430,6 +432,68 @@ class GameEngineTest {
         }
     }
 
+    // 실사용 중 발견된 버그의 회귀 테스트: 헤즈업 쇼다운에서 누가 먼저 공개될지가 예전엔 완전
+    // 무작위였다. 실제 포커 규칙대로 "마지막 베팅 라운드의 마지막 공격자가 먼저 공개, 아무도
+    // 베팅 안 했으면 포지션상 먼저 액션하는 사람이 먼저 공개"로 바꿨다 — 아래 세 테스트가 각각의
+    // 경우를 검증한다.
+    @Test
+    void 마지막_베팅_라운드에서_벳한_사람이_먼저_공개된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a(SB), b(BB) — 포스트플랍 첫 액션자는 b.
+
+        engine.applyAction("a", PlayerAction.CALL, 0);
+        engine.applyAction("b", PlayerAction.CHECK, 0); // preflop -> FLOP
+        for (int street = 0; street < 2; street++) {
+            engine.applyAction("b", PlayerAction.CHECK, 0);
+            engine.applyAction("a", PlayerAction.CHECK, 0);
+        }
+        // 리버에서 b가 벳, a가 콜 — b가 이번 라운드의(유일한) 공격자다.
+        engine.applyAction("b", PlayerAction.BET, 200);
+        engine.applyAction("a", PlayerAction.CALL, 0); // 리버 종료 -> beginShowdown()
+
+        assertEquals(Phase.RIVER, room.getPhase(), "헤즈업 결정 전까지는 phase가 아직 SHOWDOWN으로 확정되지 않는다");
+        assertTrue(room.getVoluntarilyRevealedIds().contains("b"), "리버에서 벳한 b가 먼저 공개돼야 한다");
+        assertEquals("a", room.getHeadsUpDeciderPlayerId());
+    }
+
+    @Test
+    void 전원_체크로_넘어가면_포지션상_먼저_액션하는_사람이_먼저_공개된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a(SB) — 포스트플랍 첫 액션자는 b(버튼이 아닌 쪽).
+
+        checkHeadsUpHandToRiver(engine, "a", "b"); // 프리플랍 콜/체크, 이후 전부 체크로 진행
+
+        assertTrue(room.getVoluntarilyRevealedIds().contains("b"), "아무도 안 베팅했으니 포스트플랍 첫 액션자(b)가 먼저 공개돼야 한다");
+        assertEquals("a", room.getHeadsUpDeciderPlayerId());
+    }
+
+    @Test
+    void 프리플랍에만_레이즈가_있고_이후_전부_체크면_그_레이즈어가_아니라_포지션_기준으로_공개된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 10_000));
+        room.addPlayer(new Player("b", "B", 10_000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a(SB), b(BB)
+
+        // 프리플랍: a가 레이즈, b가 콜 — 이번 핸드의 유일한 공격자는 a지만, 마지막 라운드(리버)에서는
+        // 공격이 없다. 실제 룰은 "마지막 베팅 라운드" 기준이라, 프리플랍 레이즈는 무효가 돼야 한다.
+        engine.applyAction("a", PlayerAction.RAISE, 400);
+        engine.applyAction("b", PlayerAction.CALL, 0); // preflop -> FLOP
+        for (int street = 0; street < 3; street++) {
+            engine.applyAction("b", PlayerAction.CHECK, 0);
+            engine.applyAction("a", PlayerAction.CHECK, 0);
+        }
+
+        assertTrue(room.getVoluntarilyRevealedIds().contains("b"), "프리플랍 레이즈어(a)가 아니라 포지션 기준(b)이어야 한다");
+        assertEquals("a", room.getHeadsUpDeciderPlayerId());
+    }
+
     @Test
     void 헤즈업_쇼다운은_결정_전까지_팟이_지급되지_않는다() {
         Room room = new Room();
@@ -444,13 +508,13 @@ class GameEngineTest {
         assertNotNull(room.getHeadsUpDeciderPlayerId());
         assertNull(room.getLastShowdownResult());
         assertNull(engine.resolveWinnerId(), "결정 전까지는 게임 종료(우승자) 판정도 하면 안 된다");
-        // 블라인드만 걷힌 상태 그대로, 팟은 아직 지급되지 않았다.
+        // 블라인드(+빅블라인드 자리인 b는 앤티도)만 걷힌 상태 그대로, 팟은 아직 지급되지 않았다.
         assertEquals(10_000 - Room.BIG_BLIND, room.findPlayer("a").getChips());
-        assertEquals(10_000 - Room.BIG_BLIND, room.findPlayer("b").getChips());
+        assertEquals(10_000 - Room.BIG_BLIND - room.getAnte(), room.findPlayer("b").getChips());
     }
 
     @Test
-    void 헤즈업_쇼다운에서_머크해도_실제_승자는_칩을_받는다() {
+    void 헤즈업_쇼다운에서_머크해도_칩은_어딘가로_사라지거나_늘어나지_않는다() {
         Room room = new Room();
         room.addPlayer(new Player("a", "A", 10_000));
         room.addPlayer(new Player("b", "B", 10_000));
@@ -466,10 +530,114 @@ class GameEngineTest {
         assertNull(room.getHeadsUpDeciderPlayerId(), "결정이 끝났으므로 더 이상 대기 상태가 아니다");
         assertFalse(room.getVoluntarilyRevealedIds().contains(deciderId), "머크했으므로 공개 목록에 없어야 한다");
         assertNotNull(room.getLastShowdownResult());
-        // 머크해도 팟은 정상적으로(실제 족보 비교 결과대로) 지급된다 — 시작 칩 총합(20,000)이
-        // 그대로 두 사람에게 다시 나뉘어 있어야 한다(칩이 어딘가 사라지거나 늘어나지 않았는지 확인).
+        // 머크한 사람이 실제로 이기고 있었으면 이제 상대방에게 전부 넘어간다(아래 별도 테스트가
+        // 정확한 승자를 확정적으로 검증한다) — 여기서는 실제 카드가 랜덤이라 "누가 받는지"까지는
+        // 확인할 수 없고, 시작 칩 총합(20,000)이 그대로 두 사람에게 나뉘어 있는지(칩이 사라지거나
+        // 늘어나지 않는지)만 확인한다.
         int totalChipsAfter = room.findPlayer("a").getChips() + room.findPlayer("b").getChips();
         assertEquals(20_000, totalChipsAfter);
+    }
+
+    // 실사용 중 발견된 버그의 회귀 테스트: 결정자가 실제로는 이기고 있는데(트리플 등) 머크를
+    // 선택하면, 예전에는 머크와 무관하게 항상 실제 승자에게 그대로 지급됐다. 실제 포커 규칙
+    // ("테이블에 보여주지 않은 패는 죽은 패")대로 그 몫이 전부 상대방에게 가야 한다.
+    @Test
+    void 이기고_있어도_머크하면_팟은_전부_상대방에게_간다() {
+        Room room = new Room();
+        Player a = new Player("a", "A", 10_000);
+        Player b = new Player("b", "B", 10_000);
+        room.addPlayer(a);
+        room.addPlayer(b);
+        GameEngine engine = new GameEngine(room);
+        engine.startHand(); // 버튼=a(SB) — 포스트플랍 첫 액션자는 b라서 b가 자동 공개, a가 결정자.
+
+        engine.applyAction("a", PlayerAction.CALL, 0);
+        engine.applyAction("b", PlayerAction.CHECK, 0);
+        for (int street = 0; street < 2; street++) {
+            engine.applyAction("b", PlayerAction.CHECK, 0);
+            engine.applyAction("a", PlayerAction.CHECK, 0);
+        }
+        // 커뮤니티 카드가 이미 5장 다 딜링된 리버 직전 상태 — a가 스페이드 플러시로 확실히
+        // 이기도록 카드를 덮어써서 승부를 확정적으로 만든다.
+        a.getHoleCards().clear();
+        a.getHoleCards().add(new Card(Suit.SPADE, Rank.ACE));
+        a.getHoleCards().add(new Card(Suit.SPADE, Rank.KING));
+        b.getHoleCards().clear();
+        b.getHoleCards().add(new Card(Suit.HEART, Rank.TWO));
+        b.getHoleCards().add(new Card(Suit.CLUB, Rank.THREE));
+        room.getCommunityCards().clear();
+        room.getCommunityCards().addAll(List.of(
+                new Card(Suit.SPADE, Rank.QUEEN),
+                new Card(Suit.SPADE, Rank.JACK),
+                new Card(Suit.SPADE, Rank.TEN),
+                new Card(Suit.DIAMOND, Rank.FOUR),
+                new Card(Suit.CLUB, Rank.FIVE)
+        ));
+
+        engine.applyAction("b", PlayerAction.CHECK, 0);
+        engine.applyAction("a", PlayerAction.CHECK, 0); // 리버 종료 -> beginShowdown()
+
+        assertEquals("a", room.getHeadsUpDeciderPlayerId(), "이 세팅에서는 a(버튼)가 결정자여야 한다");
+
+        engine.decideHeadsUpReveal("a", false); // a가 실제로는 이기고 있지만 머크
+
+        ShowdownResult.PotResult potResult = room.getLastShowdownResult().potResults().get(0);
+        assertEquals(List.of(b), potResult.winners(), "머크했으므로 실제로 더 좋은 패(a)가 아니라 상대(b)가 가져가야 한다");
+        assertEquals(9_800, a.getChips(), "머크한 a는 자기가 낸 몫만 잃고 더는 받지 못한다");
+        assertEquals(10_200, b.getChips(), "b가 팟 전체를 가져간다");
+
+        // 핸드 히스토리에도 머크 이후의(포기 반영된) 실제 결과가 그대로 기록돼야 한다.
+        HandHistoryEntry historyEntry = room.getHandHistory().get(0);
+        assertEquals(1, historyEntry.handNumber());
+        assertEquals(List.of("b"), historyEntry.pots().get(0).winnerIds(), "히스토리도 머크 반영 후(b 승) 결과여야 한다");
+    }
+
+    @Test
+    void 핸드가_끝나면_히스토리에_항목이_하나_쌓인다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+
+        engine.applyAction("a", PlayerAction.FOLD, 0); // b 혼자 남아 폴드승
+
+        List<HandHistoryEntry> history = room.getHandHistory();
+        assertEquals(1, history.size());
+        assertEquals(1, history.get(0).handNumber());
+        assertTrue(history.get(0).wonByFold());
+        assertEquals("b", history.get(0).foldWinWinnerId());
+        assertEquals("B", history.get(0).foldWinWinnerNickname());
+    }
+
+    @Test
+    void 앤티_레벨에서_핸드를_시작하면_빅블라인드가_앤티를_추가로_낸다() {
+        Room room = new Room();
+        Player a = new Player("a", "A", 50_000);
+        Player b = new Player("b", "B", 50_000);
+        room.addPlayer(a);
+        room.addPlayer(b);
+        GameEngine engine = new GameEngine(room);
+        for (int i = 0; i < 75; i++) {
+            room.recordHandCompletedForBlindLevel(); // 마지막 블라인드 레벨(500/1000)까지 미리 진행
+        }
+
+        engine.startHand(); // 버튼=a(헤즈업 SB), b=빅블라인드 — b가 빅블라인드+앤티를 둘 다 낸다.
+
+        assertEquals(1000, room.getAnte());
+        assertEquals(50_000 - 500, a.getChips(), "a는 스몰블라인드(500)만 낸다");
+        assertEquals(50_000 - 1000 - 1000, b.getChips(), "b는 빅블라인드(1000)+앤티(1000)를 낸다");
+        assertEquals(1000, b.getCurrentRoundBet(), "앤티는 currentRoundBet(콜 기준액)에 안 들어가고 빅블라인드만 반영돼야 한다");
+
+        // a가 콜해서 두 사람의 totalHandContribution이 같아진(1000/1000) 뒤에도 — 실사용 중 발견된
+        // 버그의 회귀 테스트: 앤티 때문에 b의 totalHandContribution만 더 커 보여서, 실시간 팟 조회
+        // (RoomStateMapper와 같은 방식)가 앤티를 가짜 사이드팟으로 나눠 b한테만 몰아주지 않고,
+        // 정상적으로 팟 하나에 다 합쳐 보여줘야 한다.
+        engine.applyAction("a", PlayerAction.CALL, 0);
+
+        List<Pot> livePots = PotCalculator.calculate(room.getPlayers(), room.getAnteCollectedThisHand());
+        assertEquals(1, livePots.size(), "기여금이 같아졌으므로(1000/1000) 앤티가 가짜 사이드팟을 만들면 안 된다");
+        assertEquals(1000 + 1000 + 1000, livePots.get(0).amount(), "a의 콜(1000)+b의 빅블라인드(1000)+앤티(1000)");
     }
 
     @Test
@@ -541,6 +709,27 @@ class GameEngineTest {
         engine.processPendingLeaves();
 
         assertEquals(1, room.getPlayers().size());
+    }
+
+    // 실사용 중 발견된 버그의 회귀 테스트: STOP으로 자동 진행이 멈춰서 프론트가 이미 "게임 준비 중"
+    // 대기 화면으로 돌아간 뒤에 나가기를 눌러도, phase가 여전히 SHOWDOWN이라는 이유만으로 3초 유예를
+    // 또 거는 문제가 있었다. 결과 화면을 충분히 오래(RESULT_VIEW_GRACE_MILLIS) 보여준 뒤라면 더 이상
+    // 보호할 화면이 없으므로 즉시 제거돼야 한다.
+    @Test
+    void 결과_유예_시간이_지나면_SHOWDOWN_상태에서도_나가기가_즉시_처리된다() throws InterruptedException {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", 1000));
+        room.addPlayer(new Player("b", "B", 1000));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+        engine.applyAction("a", PlayerAction.FOLD, 0); // b 혼자 남아 폴드승, 핸드 종료(phase == SHOWDOWN)
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+
+        Thread.sleep(5_600); // RESULT_VIEW_GRACE_MILLIS(5.5초) 경과를 흉내낸다.
+        engine.requestLeave("a", true);
+
+        assertEquals(1, room.getPlayers().size(), "결과 화면을 이미 충분히 보여줬으니 3초 유예 없이 바로 제거돼야 한다");
     }
 
     @Test
@@ -728,5 +917,101 @@ class GameEngineTest {
         assertEquals(1, room.getPlayers().size());
         assertEquals("a", engine.resolveWinnerId(), "승자 id 판정은 유지되어야 한다");
         assertEquals("A닉네임", engine.resolveWinnerNickname(), "승자가 나가도 닉네임은 고정값으로 유지되어야 한다");
+    }
+
+    @Test
+    void 방장이_아니면_강퇴할_수_없다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("c", "C", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+
+        assertThrows(GameStateException.class, () -> engine.kickPlayer("b", "c"));
+    }
+
+    @Test
+    void 자기_자신은_강퇴할_수_없다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+
+        assertThrows(GameStateException.class, () -> engine.kickPlayer("a", "a"));
+    }
+
+    @Test
+    void 핸드_진행_중에는_강퇴할_수_없다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("c", "C", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.startHand();
+
+        assertThrows(GameStateException.class, () -> engine.kickPlayer("a", "b"));
+    }
+
+    @Test
+    void 레디한_사람은_강퇴할_수_없다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+        engine.setReady("b", true);
+
+        assertThrows(GameStateException.class, () -> engine.kickPlayer("a", "b"));
+    }
+
+    @Test
+    void 레디_안한_지_얼마_안_지났으면_강퇴가_거부된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS)); // 방금 입장(레디 안 함)
+        GameEngine engine = new GameEngine(room);
+
+        assertThrows(GameStateException.class, () -> engine.kickPlayer("a", "b"));
+        assertEquals(2, room.getPlayers().size());
+    }
+
+    @Test
+    void 레디_안한_채_충분히_기다리면_방장이_강퇴할_수_있다() throws InterruptedException {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS)); // 방금 입장(레디 안 함)
+        GameEngine engine = new GameEngine(room);
+
+        Thread.sleep(3_100); // KICK_DELAY_MILLIS(3초) 경과를 흉내낸다.
+        engine.kickPlayer("a", "b");
+
+        assertEquals(1, room.getPlayers().size());
+        assertThrows(IllegalArgumentException.class, () -> room.findPlayer("b"));
+    }
+
+    // 실사용 중 발견된 버그의 회귀 테스트: 핸드가 진행되는 동안(레디 여부가 아무 의미 없는 시간)에
+    // 레디 안 한 상태로 이미 3초 이상 지나 있었다면, 핸드가 막 끝나자마자(반응할 틈도 없이) 곧바로
+    // 강퇴 가능해지는 문제가 있었다. 핸드가 끝나는 시점(onHandConcluded)에 강퇴 유예 시계가 다시
+    // 리셋되어야 한다.
+    @Test
+    void 핸드가_진행되는_동안_레디_안한_시간이_길어도_핸드가_막_끝난_직후엔_바로_강퇴되지_않는다() throws InterruptedException {
+        Room room = new Room();
+        room.addPlayer(new Player("a", "A", Room.STARTING_CHIPS)); // a가 방장
+        room.addPlayer(new Player("b", "B", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("c", "C", Room.STARTING_CHIPS)); // 레디 안 한 채로 쭉 유지됨
+        GameEngine engine = new GameEngine(room);
+
+        // c가 레디 안 한 상태로 이미 3초 넘게 지난 뒤에 핸드가 시작되고 끝나는 상황을 흉내낸다.
+        Thread.sleep(3_100);
+        engine.startHand();
+        engine.applyAction("a", PlayerAction.FOLD, 0);
+        engine.applyAction("b", PlayerAction.FOLD, 0); // c 혼자 남아 폴드승, 핸드 종료(phase == SHOWDOWN)
+
+        assertThrows(GameStateException.class, () -> engine.kickPlayer("a", "c"),
+                "핸드가 막 끝난 직후에는 레디 안 한 시간이 얼마였든 유예를 다시 줘야 한다");
+
+        Thread.sleep(3_100);
+        engine.kickPlayer("a", "c");
+
+        assertEquals(2, room.getPlayers().size());
     }
 }

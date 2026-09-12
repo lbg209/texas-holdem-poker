@@ -10,6 +10,7 @@ import com.lbg0146.backend.player.Player;
 import com.lbg0146.backend.player.PlayerStatus;
 import com.lbg0146.backend.room.Phase;
 import com.lbg0146.backend.room.Room;
+import com.lbg0146.backend.room.controller.dto.BlindLevelView;
 import com.lbg0146.backend.room.controller.dto.CardView;
 import com.lbg0146.backend.room.controller.dto.PlayerView;
 import com.lbg0146.backend.room.controller.dto.PotView;
@@ -40,7 +41,7 @@ public class RoomStateMapper {
         // room.pots는 핸드 종료 시 실제 정산에만 쓰이는 필드라 베팅 중엔 비어 있다. 조회 응답은
         // 항상 그 시점 기준의 실시간 팟을 보여줘야 하므로, GameEngine의 정산 로직과 별개로
         // totalHandContribution을 기준 삼아 매번 다시 계산한다(핸드 종료 후에도 같은 값이 나온다).
-        List<PotView> pots = PotCalculator.calculate(room.getPlayers()).stream()
+        List<PotView> pots = PotCalculator.calculate(room.getPlayers(), room.getAnteCollectedThisHand()).stream()
                 .map(pot -> PotView.from(pot, room.getPlayers()))
                 .toList();
 
@@ -67,6 +68,12 @@ public class RoomStateMapper {
                 room.getSmallBlind(),
                 room.getBigBlind(),
                 room.getMaxPlayers(),
+                room.getAnte(),
+                room.getCurrentBlindLevel(),
+                room.getHandsSinceBlindReset(),
+                room.getBlindStructure().stream()
+                        .map(l -> new BlindLevelView(l.level(), l.smallBlind(), l.bigBlind(), l.ante()))
+                        .toList(),
                 room.getRoomCode(),
                 room.getName(),
                 room.isPrivate()
@@ -126,6 +133,7 @@ public class RoomStateMapper {
         return new PlayerView(player.getId(), player.getNickname(), player.getChips(),
                 player.getStatus(), player.getCurrentRoundBet(), player.getTotalHandContribution(),
                 player.getLastAction(), player.getChips() - player.getChipsAtHandStart(), holeCards,
-                player.isReady(), player.isAutoFolded(), player.isLeaving());
+                player.isReady(), player.isAutoFolded(), player.isLeaving(),
+                player.getId().equals(room.getOwnerId()), player.getSeatIndex());
     }
 }

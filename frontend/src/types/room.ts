@@ -43,6 +43,12 @@ export interface PlayerView {
   autoFolded: boolean;
   // "나가기"를 예약했는지 — true면 핸드가 끝나는 즉시(또는 핸드 진행 중이 아니면 바로) 방에서 제거된다.
   leaving: boolean;
+  // 방장(방을 만든 뒤 가장 먼저 입장했거나, 그 방장이 나가서 승계받은 사람)인지 — 순수 표시용
+  // 배지 + 강퇴 버튼 노출 여부 판단에 쓰인다.
+  isOwner: boolean;
+  // 고정 좌석제의 물리적 좌석 번호(0~maxPlayers-1). 빈 좌석을 가려내고, 빈자리 클릭 시
+  // 입장/이동 API에 그대로 실어 보내는 데 쓰인다.
+  seatIndex: number;
 }
 
 export interface ShowdownHandView {
@@ -52,6 +58,40 @@ export interface ShowdownHandView {
   handRank: HandRank | null;
   bestFive: CardView[] | null;
   isWinner: boolean;
+}
+
+// holeCards/handRank/bestFive는 본인이거나 그 핸드에서 실제로 공개됐던 경우에만 채워진다 —
+// 머크했으면 지난 핸드라도 영원히 비어 있다(실시간 쇼다운 공개 규칙과 동일).
+export interface HandHistoryHandView {
+  playerId: string;
+  nickname: string;
+  holeCards: CardView[];
+  handRank: HandRank | null;
+  bestFive: CardView[] | null;
+  isWinner: boolean;
+}
+
+export interface HandHistoryPotView {
+  amount: number;
+  winnerIds: string[];
+}
+
+// wonByFold=true면 hands가 비어 있고(실제 쇼다운이 없었으므로) foldWinWinnerId/Nickname만 채워진다.
+export interface HandHistoryEntryView {
+  handNumber: number;
+  communityCards: CardView[];
+  pots: HandHistoryPotView[];
+  hands: HandHistoryHandView[];
+  wonByFold: boolean;
+  foldWinWinnerId: string | null;
+  foldWinWinnerNickname: string | null;
+}
+
+export interface BlindLevelView {
+  level: number;
+  smallBlind: number;
+  bigBlind: number;
+  ante: number;
 }
 
 export interface RoomStateResponse {
@@ -82,6 +122,14 @@ export interface RoomStateResponse {
   smallBlind: number;
   bigBlind: number;
   maxPlayers: number;
+  // 판 수 기준 블라인드 상승이 마지막 단계에 도달하면 걷는 앤티(빅블라인드 앤티 방식 — 버튼만
+  // 혼자 냄). 그 전까지는 0.
+  ante: number;
+  // 1부터 시작하는 현재 블라인드 레벨 번호, 블라인드 리셋(방 시작/GAME OVER 리매치) 이후 지금까지
+  // 끝난 핸드 수, 전체 블라인드 구조표(고정 6단계, 몇 판째인지와 무관하게 항상 동일).
+  currentBlindLevel: number;
+  handsSinceBlindReset: number;
+  blindStructure: BlindLevelView[];
   // 방 정체성(로비/좌측 정보 패널 표시용).
   roomCode: string;
   name: string;
