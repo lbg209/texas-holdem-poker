@@ -73,7 +73,13 @@ export function useRoomSocket(
       };
 
       socket.onclose = () => {
-        socketRef.current = null;
+        // socketRef가 "지금 닫히는 이 소켓"을 가리킬 때만 비운다. roomCode는 그대로 두고 playerId만
+        // null -> 실제값으로 바뀌는 경우(관전하다가 좌석을 골라 입장하는 흐름) 새 소켓이 이미
+        // socketRef에 들어간 뒤에 옛 소켓의 onclose가 늦게 발동할 수 있는데, 조건 없이 비우면
+        // 방금 연결된 정상 소켓 참조까지 지워버려서 sendAction이 이후 계속 조용히 실패하게 된다.
+        if (socketRef.current === socket) {
+          socketRef.current = null;
+        }
         if (cancelled) return;
         setConnectionStatus('closed');
         // 자동 재연결은 끊긴 뒤 첫 시도에서만 1회 수행한다. 수동 재연결(reconnect())이
