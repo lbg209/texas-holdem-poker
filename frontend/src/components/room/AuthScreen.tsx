@@ -3,6 +3,7 @@ import type { FormEvent } from 'react';
 import { useRoom } from '../../state/RoomContext';
 import { RulesPage } from './RulesPage';
 import { RegisterModal } from './RegisterModal';
+import { PokerLogo } from './PokerLogo';
 
 type Mode = 'login' | 'guest';
 
@@ -35,7 +36,9 @@ export function AuthScreen() {
   }
 
   return (
-    <div className="mx-auto mt-24 max-w-sm rounded-lg bg-slate-800 p-6">
+    <div className="mx-auto mt-16 max-w-sm">
+      <PokerLogo />
+      <div className="rounded-lg bg-slate-800 p-6">
       <h1 className="mb-4 text-xl font-semibold">포커 로비 입장</h1>
 
       <div className="mb-4 flex gap-2 text-sm">
@@ -111,6 +114,7 @@ export function AuthScreen() {
           }}
         />
       )}
+      </div>
     </div>
   );
 }

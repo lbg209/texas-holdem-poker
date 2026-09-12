@@ -3,6 +3,8 @@ import { useRoom } from '../../state/RoomContext';
 import { CreateRoomModal } from './CreateRoomModal';
 import { JoinByCodeModal } from './JoinByCodeModal';
 import { RulesPage } from './RulesPage';
+import { LobbyNoticePanel } from './LobbyNoticePanel';
+import { PokerLogo } from './PokerLogo';
 import type { RoomSummaryView } from '../../types/room';
 
 type SortField = 'title' | 'players';
@@ -54,7 +56,7 @@ function SortHeaderButton({
 // 로그인/게스트 진입 이후의 로비 화면. 방 목록을 한 줄씩 보여주고, 클릭하면 왼쪽에 정보 패널이
 // 열리며 "입장" 버튼으로 실제로 들어갈 수 있다.
 export function LobbyScreen() {
-  const { state, refreshRoomList, selectRoom, clearSelectedRoom, joinSelectedRoom, logout } = useRoom();
+  const { state, refreshRoomList, selectRoom, clearSelectedRoom, spectateSelectedRoom, logout } = useRoom();
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showJoinByCodeModal, setShowJoinByCodeModal] = useState(false);
   const [showRules, setShowRules] = useState(false);
@@ -90,6 +92,10 @@ export function LobbyScreen() {
 
   const detail = state.selectedRoomDetail;
   const identityLabel = state.loggedInNickname ?? (state.guestNickname ? `${state.guestNickname} (Guest)` : null);
+  // 로비 전체 통계 — 별도 집계 API 없이 이미 받아온 목록에서 바로 계산한다. "총 접속자 수"가
+  // 아니라 "지금 어떤 방이든 앉아있는 사람 수"에 가깝다(로비만 구경 중인 사람은 집계되지 않음).
+  const totalRoomCount = state.roomList.length;
+  const totalPlayerCount = state.roomList.reduce((sum, room) => sum + room.playerCount, 0);
 
   if (showRules) {
     return <RulesPage onBack={() => setShowRules(false)} />;
@@ -97,6 +103,7 @@ export function LobbyScreen() {
 
   return (
     <div className="mx-auto max-w-3xl">
+      <PokerLogo />
       <div className="mt-6 flex items-center justify-between text-sm">
         <button className="text-slate-400 underline hover:text-slate-300" onClick={() => setShowRules(true)}>
           게임 규칙
@@ -110,57 +117,69 @@ export function LobbyScreen() {
       </div>
 
       <div className="mt-4 flex gap-4">
-      {detail && (
-        <div className="w-64 shrink-0 rounded-lg bg-slate-800 p-4">
-          <div className="mb-3 flex items-center justify-between">
-            <h2 className="text-lg font-semibold">{detail.name}</h2>
-            <button className="text-slate-400 hover:text-slate-200" onClick={clearSelectedRoom} aria-label="닫기">
-              ✕
+      {/* 방을 고르기 전에도 항상 같은 폭으로 고정해서, 클릭했을 때 레이아웃이 갑자기 밀리지 않게
+          한다. 방 상세는 골랐을 때만 위에 나타나고, 공지 패널은 그 아래(또는 안 골랐으면 이 칸
+          전체)에 항상 남아있는다 — 방을 봤다고 공지가 사라지지 않게. */}
+      <div className="w-64 shrink-0 space-y-4 rounded-lg bg-slate-800 p-4">
+        {detail && (
+          <div className="border-b border-slate-700 pb-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">{detail.name}</h2>
+              <button className="text-slate-400 hover:text-slate-200" onClick={clearSelectedRoom} aria-label="닫기">
+                ✕
+              </button>
+            </div>
+            <dl className="space-y-1 text-sm text-slate-300">
+              <div className="flex justify-between">
+                <dt className="text-slate-500">인원</dt>
+                <dd>{detail.players.length} / {detail.maxPlayers}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-500">시작 칩</dt>
+                <dd>{detail.startingChips.toLocaleString()}</dd>
+              </div>
+              <div className="flex justify-between">
+                <dt className="text-slate-500">블라인드</dt>
+                <dd>{detail.smallBlind.toLocaleString()} / {detail.bigBlind.toLocaleString()}</dd>
+              </div>
+              {detail.ante > 0 && (
+                <div className="flex justify-between">
+                  <dt className="text-slate-500">앤티</dt>
+                  <dd>{detail.ante.toLocaleString()}</dd>
+                </div>
+              )}
+              {detail.isPrivate && (
+                <div className="flex justify-between">
+                  <dt className="text-slate-500">공개 여부</dt>
+                  <dd>🔒 비공개</dd>
+                </div>
+              )}
+            </dl>
+
+            {detail.isPrivate && (
+              <input
+                className="mt-3 w-full rounded bg-slate-700 px-3 py-2 text-sm outline-none"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="비밀번호"
+              />
+            )}
+
+            <button
+              className="mt-3 w-full rounded bg-emerald-600 px-4 py-2 font-medium disabled:opacity-50"
+              disabled={detail.players.length >= detail.maxPlayers}
+              onClick={() => spectateSelectedRoom(detail.isPrivate ? password : undefined)}
+            >
+              {detail.players.length >= detail.maxPlayers ? '정원 초과' : '입장'}
             </button>
           </div>
-          <dl className="space-y-1 text-sm text-slate-300">
-            <div className="flex justify-between">
-              <dt className="text-slate-500">인원</dt>
-              <dd>{detail.players.length} / {detail.maxPlayers}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-slate-500">시작 칩</dt>
-              <dd>{detail.startingChips.toLocaleString()}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-slate-500">블라인드</dt>
-              <dd>{detail.smallBlind.toLocaleString()} / {detail.bigBlind.toLocaleString()}</dd>
-            </div>
-            {detail.isPrivate && (
-              <div className="flex justify-between">
-                <dt className="text-slate-500">공개 여부</dt>
-                <dd>🔒 비공개</dd>
-              </div>
-            )}
-          </dl>
-
-          {detail.isPrivate && (
-            <input
-              className="mt-3 w-full rounded bg-slate-700 px-3 py-2 text-sm outline-none"
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="비밀번호"
-            />
-          )}
-
-          <button
-            className="mt-3 w-full rounded bg-emerald-600 px-4 py-2 font-medium disabled:opacity-50"
-            disabled={detail.players.length >= detail.maxPlayers}
-            onClick={() => void joinSelectedRoom(detail.isPrivate ? password : undefined)}
-          >
-            {detail.players.length >= detail.maxPlayers ? '정원 초과' : '입장'}
-          </button>
-        </div>
-      )}
+        )}
+        <LobbyNoticePanel />
+      </div>
 
       <div className="flex-1 rounded-lg bg-slate-800 p-4">
-        <div className="mb-3 flex items-center justify-between">
+        <div className="mb-1 flex items-center justify-between">
           <h1 className="text-xl font-semibold">로비</h1>
           <div className="flex gap-2">
             <button
@@ -180,6 +199,10 @@ export function LobbyScreen() {
             </button>
           </div>
         </div>
+
+        <p className="mb-3 text-xs text-slate-500">
+          방 {totalRoomCount}개 · 플레이 중 {totalPlayerCount}명
+        </p>
 
         <input
           className="mb-3 w-full rounded bg-slate-700 px-3 py-2 text-sm outline-none"
@@ -207,10 +230,16 @@ export function LobbyScreen() {
                   }`}
                   onClick={() => void selectRoom(room.roomCode)}
                 >
-                  <span className="flex items-center gap-2">
-                    <span>{room.isPrivate ? `🔒 ${room.name}` : room.name}</span>
-                    <span className={`rounded px-1.5 py-0.5 text-[10px] ${room.inProgress ? 'bg-red-700' : 'bg-emerald-700'}`}>
-                      {room.inProgress ? '게임중' : '대기중'}
+                  <span className="flex flex-col gap-0.5">
+                    <span className="flex items-center gap-2">
+                      <span>{room.isPrivate ? `🔒 ${room.name}` : room.name}</span>
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${room.inProgress ? 'bg-red-700' : 'bg-emerald-700'}`}>
+                        {room.inProgress ? '게임중' : '대기중'}
+                      </span>
+                    </span>
+                    <span className="text-[11px] text-slate-500">
+                      블라인드 {(room.bigBlind / 2).toLocaleString()}/{room.bigBlind.toLocaleString()} · 시작 칩{' '}
+                      {room.startingChips.toLocaleString()}
                     </span>
                   </span>
                   <span className="text-slate-400">

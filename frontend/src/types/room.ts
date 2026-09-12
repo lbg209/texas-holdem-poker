@@ -144,7 +144,8 @@ export interface CreateRoomResponse {
   roomCode: string;
 }
 
-// 로비의 방 목록 한 줄에 대응한다. 비공개방은 이 목록 자체에 나타나지 않는다(백엔드가 걸러서 내려줌).
+// 로비의 방 목록 한 줄에 대응한다. 비공개방도 함께 내려오고(자물쇠 표시만 프론트가 붙임), 보호는
+// 입장 시 비밀번호 검사가 담당한다.
 export interface RoomSummaryView {
   roomCode: string;
   name: string;
@@ -152,6 +153,10 @@ export interface RoomSummaryView {
   playerCount: number;
   maxPlayers: number;
   inProgress: boolean;
+  // 목록 줄에서부터 "어떤 판인지" 감을 잡을 수 있도록 노출한다. 스몰블라인드는 항상 bigBlind의
+  // 절반이라 따로 안 내려준다.
+  startingChips: number;
+  bigBlind: number;
 }
 
 export interface ErrorResponse {
