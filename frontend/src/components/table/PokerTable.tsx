@@ -46,7 +46,14 @@ export function PokerTable({ displayState, activeVisualEvent, dealProgress, myPl
       .flatMap((hand) => getHighlightedCardsForShowdown(hand, displayState.showdownHands!)) ?? [];
 
   return (
-    <div className="relative mx-auto mt-12 aspect-[16/10] w-full max-w-4xl rounded-[45%] border-8 border-emerald-950 bg-gradient-to-br from-emerald-700 via-emerald-800 to-emerald-950 shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_0_70px_rgba(0,0,0,0.55)] sm:mt-16">
+    // z-0: position만 relative고 z-index가 없으면(z-index: auto) 이 요소가 자체 쌓임 맥락(stacking
+    // context)을 만들지 못해서, 안에 있는 z-20~40짜리 자식들(공용카드/팟/칩 등)이 이 테이블 박스
+    // 안에 갇히지 않고 최상위 레벨로 그대로 노출돼버린다 — 그러면 좌측 상단 토글(z-20) 안에 떠 있는
+    // 모달(예: 족보, z-50)보다도 위에 그려지는 문제가 있었다(모달은 z-20 안에 갇혀 20으로 취급되는데,
+    // 테이블 내부 z-40은 안 갇혀서 그대로 40으로 경쟁하기 때문). 명시적으로 z-0을 줘서 테이블
+    // 내부의 모든 z-index를 이 박스 안에 가두면, 외부의 다른 z-20 요소들과는 정상적으로(0 < 20)
+    // 비교되면서 내부 순서(20/30/40)는 그대로 유지된다.
+    <div className="relative z-0 mx-auto mt-12 aspect-[16/10] w-full max-w-4xl rounded-[45%] border-8 border-emerald-950 bg-gradient-to-br from-emerald-700 via-emerald-800 to-emerald-950 shadow-[0_20px_50px_rgba(0,0,0,0.6),inset_0_0_70px_rgba(0,0,0,0.55)] sm:mt-16">
       {/* z-40: 팟 금액 텍스트는 근처를 지나가는 베팅 더미(BetPiles, z-20)나 날아가는 칩(FlyingChips, z-30)에
           가려지면 안 되므로 항상 그 위에 그린다. */}
       <div className="absolute left-1/2 top-1/2 z-40 flex -translate-x-1/2 -translate-y-1/2 flex-col items-center gap-2">
