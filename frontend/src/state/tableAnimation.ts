@@ -244,6 +244,12 @@ export function deriveSteps(prev: RoomStateResponse, next: RoomStateResponse): A
         currentActorId: null,
         currentBet: null,
         minimumRaise: null,
+        // pots는 백엔드가 매번 실시간으로 다시 계산해서(totalHandContribution 기준) 내려주는
+        // 값이라, 액션한 사람의 totalHandContribution/currentRoundBet은 여기서 이미 next 기준으로
+        // 갱신하면서 pots만 옛 값(prev) 그대로 얼려두면 그 사이 프레임에서 PotDisplay가
+        // "걷힌 팟(pots 기반) - 진행중 베팅액(currentRoundBet 기준)"을 계산할 때 서로 다른 시점의
+        // 값을 섞어써서 순간적으로 음수 팟이 보이는 버그가 있었다. 같은 스텝에서 함께 최신화한다.
+        pots: next.pots,
         players: state.players.map((p) => {
           if (!actedIds.includes(p.id)) {
             return p;
