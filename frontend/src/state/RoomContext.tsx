@@ -125,7 +125,11 @@ function reducer(state: RoomState, action: Action): RoomState {
         roomCode: null,
         myPlayerId: null,
         roomState: null,
-        screen: 'lobby',
+        // 새 탭으로 열어서 roomCode+playerId(localStorage, 탭 간 공유)만으로 테이블 화면을 복원한
+        // 경우, 그 탭의 sessionStorage에는 게스트 닉네임이 없을 수 있다(로그인/게스트 화면을 거친
+        // 적이 없으므로) — 그 상태로 로비에 보내면 방 만들기 등에서 닉네임이 비어 있는 채로 요청이
+        // 나가 실패한다. 신원(게스트 닉네임/로그인)이 없으면 로비 대신 로그인/게스트 화면으로 보낸다.
+        screen: state.guestNickname || state.authToken ? 'lobby' : 'auth',
         isVerifying: false,
         pendingJoinPassword: null,
         pendingJoinByCode: false,
