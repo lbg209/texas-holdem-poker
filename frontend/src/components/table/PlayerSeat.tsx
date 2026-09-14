@@ -398,8 +398,11 @@ export function PlayerSeat({
         <div className="flex flex-col items-center gap-1">
           <div className="flex items-center gap-1">
             <ChipStack amount={player.chips} />
-            {/* 실제 방송 중계처럼, 올인한 동안(이번 핸드가 끝날 때까지) 칩 스택 오른쪽에 계속 떠 있다. */}
-            {player.status === 'ALL_IN' && <AllInBadge />}
+            {/* 실제 방송 중계처럼, 올인한 동안(이번 핸드가 끝날 때까지) 칩 스택 오른쪽에 계속 떠 있다.
+                다른 핸드 한정 표시(FOLD 라벨/반투명 등)와 마찬가지로 showCards를 따라간다 — 안 그러면
+                핸드가 끝난 뒤 다음 핸드가 바로 시작되지 않는 경우(대기 화면으로 넘어간 경우) 이미
+                끝난 핸드의 ALL-IN 배지가 대기 화면에서도 계속 떠 있는 채로 남는다. */}
+            {showCards && player.status === 'ALL_IN' && <AllInBadge />}
           </div>
           <span className="text-sm font-semibold text-amber-200">
             {formatMoney(player.chips)}
