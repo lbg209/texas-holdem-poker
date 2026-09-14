@@ -123,9 +123,13 @@ export function LobbyScreen() {
       <div className="w-64 shrink-0 space-y-4 rounded-lg bg-slate-800 p-4">
         {detail && (
           <div className="border-b border-slate-700 pb-4">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-lg font-semibold">{detail.name}</h2>
-              <button className="text-slate-400 hover:text-slate-200" onClick={clearSelectedRoom} aria-label="닫기">
+            <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+              <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">{detail.name}</h2>
+              <button
+                className="shrink-0 text-slate-400 hover:text-slate-200"
+                onClick={clearSelectedRoom}
+                aria-label="닫기"
+              >
                 ✕
               </button>
             </div>
@@ -230,10 +234,16 @@ export function LobbyScreen() {
                   }`}
                   onClick={() => void selectRoom(room.roomCode)}
                 >
-                  <span className="flex flex-col gap-0.5">
-                    <span className="flex items-center gap-2">
-                      <span>{room.isPrivate ? `🔒 ${room.name}` : room.name}</span>
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${room.inProgress ? 'bg-red-700' : 'bg-emerald-700'}`}>
+                  <span className="flex min-w-0 flex-col gap-0.5">
+                    {/* min-w-0 없이는 방 제목이 아무리 길어도 이 줄이 줄어들지 않고, 대신 옆의 대기중
+                        배지 쪽이 극단적으로 눌려서 글자가 한 글자씩 세로로 쌓이는 것처럼 보이는
+                        문제가 있었다 — 제목은 truncate로 말줄임표 처리하고, 배지는 shrink-0으로
+                        절대 안 눌리게 고정한다. */}
+                    <span className="flex min-w-0 items-center gap-2">
+                      <span className="min-w-0 flex-1 truncate">{room.isPrivate ? `🔒 ${room.name}` : room.name}</span>
+                      <span
+                        className={`shrink-0 whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] ${room.inProgress ? 'bg-red-700' : 'bg-emerald-700'}`}
+                      >
                         {room.inProgress ? '게임중' : '대기중'}
                       </span>
                     </span>
@@ -242,7 +252,7 @@ export function LobbyScreen() {
                       {room.startingChips.toLocaleString()}
                     </span>
                   </span>
-                  <span className="text-slate-400">
+                  <span className="shrink-0 text-slate-400">
                     {room.playerCount}/{room.maxPlayers}
                   </span>
                 </button>
