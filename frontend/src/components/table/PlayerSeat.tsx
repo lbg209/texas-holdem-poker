@@ -30,6 +30,14 @@ const MY_CARD_PEEK_FLIP_DURATION_MS = 150;
 // 보유칩 더미는 정보박스 옆(중앙 쪽)에, 고정된 만큼 떨어진 자리에 둔다.
 const CHIP_HORIZONTAL_OFFSET = 17;
 
+// 포지션 배지 색 — BTN(딜러 버튼)/SB/BB만 실제 카지노 관행에 가깝게 각자 색을 줘서 한눈에 구분되게
+// 한다. UTG/HJ/CO는 매핑에 없으면 기존 회색(호출부의 기본값)을 그대로 쓴다.
+const POSITION_BADGE_COLORS: Partial<Record<Position, string>> = {
+  BTN: 'bg-amber-400 text-slate-900',
+  SB: 'bg-blue-600 text-white',
+  BB: 'bg-red-600 text-white',
+};
+
 interface PlayerSeatProps {
   player: PlayerView;
   // 정보박스(닉네임/액션/족보)의 좌표. 카드/보유칩은 여기서 고정된 만큼 떨어진 위치로 계산한다
@@ -292,6 +300,22 @@ export function PlayerSeat({
         }}
       >
         <div className="relative">
+          {/* BTN/SB/BB 같은 포지션은 실제 딜러 버튼처럼 좌석 정보박스 모서리에 얹힌 원형 배지로
+              보여준다 — 예전엔 닉네임 옆에 작은 글자로만 붙어있어서 눈에 잘 안 띈다는 피드백이 있었다.
+              그중 실제로 매 핸드 중요한 BTN(딜러 버튼)/SB/BB만 각자 색을 줘서 한눈에 구분되게 하고,
+              UTG/HJ/CO 같은 나머지 자리는 굳이 안 쓰이는 정보라 기존 회색을 유지한다. */}
+          {tablePosition && (
+            // left-0 + -translate-x-1/2로 배지 중심을 박스 왼쪽 꼭짓점에 정확히 맞춘다(이전엔
+            // -left-2 -top-2라 배지 중심이 꼭짓점보다 오른쪽/아래로 치우쳐 보였다). 세로는 정확히
+            // top-0(-translate-y-1/2)로 두면 배지 위쪽이 바로 위 카드와 살짝 닿아서, top-1.5만큼
+            // 살짝 내려서 카드와 여유를 둔다.
+            <div
+              className={`absolute left-0 top-1.5 z-10 flex h-7 w-7 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-slate-100 text-[11px] font-bold shadow-md ${POSITION_BADGE_COLORS[tablePosition] ?? 'bg-slate-800 text-slate-100'}`}
+              title={tablePosition}
+            >
+              {tablePosition}
+            </div>
+          )}
           <div className="absolute bottom-full left-1/2 mb-2 -translate-x-1/2">{cards}</div>
           <div
             className={`relative flex min-w-36 flex-col items-center gap-0.5 rounded-md px-3 py-2 text-sm shadow-md sm:text-base ${
@@ -316,9 +340,6 @@ export function PlayerSeat({
               {isChipLeader && <span title="칩리더">👑</span>}
               {player.isOwner && <span title="방장">🎖️</span>}
               {player.nickname}
-              {tablePosition && (
-                <span className="ml-1 rounded bg-slate-200 px-1 text-[10px] text-slate-900">{tablePosition}</span>
-              )}
               {player.leaving ? (
                 <span
                   className="ml-1 rounded bg-red-600 px-1 text-[10px] text-white"
