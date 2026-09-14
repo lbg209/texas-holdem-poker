@@ -24,6 +24,8 @@ export function BetBuilder({ minTotal, maxTotal, actionLabel, onConfirm }: BetBu
   }, [minTotal]);
 
   const addChip = (chip: number) => setAmount((prev) => Math.min(prev + chip, maxTotal));
+  // 쌓인 금액보다 큰 칩으로 빼려고 해도(예: 500원인 상태에서 -1,000) 음수로는 안 내려가고 0에서 멈춘다.
+  const subtractChip = (chip: number) => setAmount((prev) => Math.max(prev - chip, 0));
   const reset = () => setAmount(0);
 
   const effectiveAmount = Math.max(amount, minTotal);
@@ -32,19 +34,36 @@ export function BetBuilder({ minTotal, maxTotal, actionLabel, onConfirm }: BetBu
   return (
     <div className="flex flex-col items-center gap-2 rounded-lg bg-gradient-to-b from-slate-700 to-slate-900 p-3 shadow-inner">
       <span className="text-lg font-semibold text-amber-300 drop-shadow">{formatMoney(amount)}</span>
-      <div className="flex flex-wrap justify-center gap-1">
-        {CHIP_PRESETS.map((chip) => (
-          <button
-            key={chip}
-            className="rounded bg-gradient-to-b from-slate-500 to-slate-700 px-2 py-1 text-xs shadow-md active:shadow-inner disabled:opacity-40"
-            disabled={amount >= maxTotal}
-            onClick={() => addChip(chip)}
-          >
-            +{formatMoney(chip)}
-          </button>
-        ))}
+      <div className="flex items-stretch gap-2">
+        {/* w-14처럼 모든 버튼을 같은 고정 너비로 강제하면 열은 맞아도 작은 금액 버튼까지 커져서
+            원래 크기가 망가진다. 대신 두 줄을 하나의 grid(5열)로 묶으면, 같은 열(같은 금액)의
+            +/- 버튼끼리만 서로 폭을 맞추고(max-content) 다른 금액대의 버튼 크기는 원래처럼
+            제각각 자기 내용물 크기를 유지한다. */}
+        <div className="grid grid-cols-[repeat(5,max-content)] gap-1">
+          {CHIP_PRESETS.map((chip) => (
+            <button
+              key={`add-${chip}`}
+              className="rounded bg-gradient-to-b from-slate-500 to-slate-700 px-2 py-1 text-center text-xs shadow-md active:shadow-inner disabled:opacity-40"
+              disabled={amount >= maxTotal}
+              onClick={() => addChip(chip)}
+            >
+              +{formatMoney(chip)}
+            </button>
+          ))}
+          {CHIP_PRESETS.map((chip) => (
+            <button
+              key={`sub-${chip}`}
+              className="rounded bg-gradient-to-b from-slate-500 to-slate-700 px-2 py-1 text-center text-xs shadow-md active:shadow-inner disabled:opacity-40"
+              disabled={amount <= 0}
+              onClick={() => subtractChip(chip)}
+            >
+              -{formatMoney(chip)}
+            </button>
+          ))}
+        </div>
+        {/* items-stretch 덕분에 옆 두 줄(+/-)을 합친 높이만큼 자동으로 늘어난다. */}
         <button
-          className="rounded bg-gradient-to-b from-slate-400 to-slate-600 px-2 py-1 text-xs shadow-md active:shadow-inner"
+          className="rounded bg-gradient-to-b from-slate-400 to-slate-600 px-3 text-sm font-medium shadow-md active:shadow-inner"
           onClick={reset}
         >
           초기화
