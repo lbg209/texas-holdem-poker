@@ -7,6 +7,7 @@ import { PokerTable } from './components/table/PokerTable';
 import { ActionBar } from './components/table/ActionBar';
 import { ShowdownDecisionPanel } from './components/table/ShowdownDecisionPanel';
 import { RoomInfoToggle } from './components/table/RoomInfoToggle';
+import { BettingOrderToggle } from './components/table/BettingOrderToggle';
 import { HandHistoryToggle } from './components/table/HandHistoryToggle';
 import { BlindStructureToggle } from './components/table/BlindStructureToggle';
 import { HandRankToggle } from './components/table/HandRankToggle';
@@ -35,6 +36,7 @@ function RoomGate() {
           세로로 겹쳐서 가려지지도 않는다. */}
       <div className="fixed left-4 top-4 z-20 flex flex-col items-start gap-2">
         <RoomInfoToggle />
+        <BettingOrderToggle />
         <HandRankToggle />
         <HandHistoryToggle />
         <BlindStructureToggle />
