@@ -1,10 +1,11 @@
+import { useEffect } from 'react';
 import { useRoom } from '../../state/RoomContext';
 import { useCountdownSeconds } from '../../lib/useCountdownSeconds';
 import { useShowBoard } from '../../lib/useShowBoard';
 
 // 백엔드 HeadsUpRevealTimerService.DECISION_TIME_LIMIT_SECONDS와 맞춘 값 — 진행바/색 전환에만 쓰인다.
-const DECISION_TIME_LIMIT_SECONDS = 8;
-const URGENT_SECONDS_THRESHOLD = 3;
+const DECISION_TIME_LIMIT_SECONDS = 5;
+const URGENT_SECONDS_THRESHOLD = 2;
 
 // 핸드 종료 후 "카드를 공개할지" 결정하는 UI. 액션바(베팅 버튼)와는 별개로 테이블 오른쪽에
 // 고정 배치한다 — 베팅 버튼 영역은 화면 아래쪽이라 접근성이 떨어진다는 피드백을 반영했다.
@@ -13,7 +14,7 @@ const URGENT_SECONDS_THRESHOLD = 3;
 //  2) 헤즈업(2인) 쇼다운 — 무작위로 한 명은 이미 자동 공개됐고, 나머지 한 명(나)이 공개/머크를
 //     제한 시간(8초) 안에 선택. 시간 초과면 서버가 알아서 강제 공개 처리한다.
 export function ShowdownDecisionPanel() {
-  const { state, revealHand, decideReveal } = useRoom();
+  const { state, revealHand, decideReveal, sendHeadsUpRevealReady } = useRoom();
   // ActionBar와 같은 이유로 displayState 기준 — 연출이 다 따라잡은 뒤에만 패널이 뜬다.
   const displayState = state.displayState;
   const secondsLeft = useCountdownSeconds(displayState?.headsUpRevealDeadlineAtMillis ?? null);
@@ -22,11 +23,21 @@ export function ShowdownDecisionPanel() {
   const { showBoard } = useShowBoard(displayState);
   const myId = state.myPlayerId;
 
+  const isHeadsUpDecider = myId !== null && displayState?.headsUpDeciderPlayerId === myId;
+
+  // 상대 카드 공개 연출이 다 끝나 이 패널이 실제로 뜨는(=isHeadsUpDecider가 false->true로 바뀌는)
+  // 바로 그 순간에만 서버로 신호를 보낸다 — 백엔드는 이 신호를 받은 시점부터 진짜 결정 제한
+  // 시간을 센다(그 전엔 headsUpRevealDeadlineAtMillis가 null이라 카운트다운도 안 뜬다).
+  useEffect(() => {
+    if (isHeadsUpDecider) {
+      sendHeadsUpRevealReady();
+    }
+  }, [isHeadsUpDecider, sendHeadsUpRevealReady]);
+
   if (!displayState || !myId) {
     return null;
   }
 
-  const isHeadsUpDecider = displayState.headsUpDeciderPlayerId === myId;
   const canRevealFoldWin =
     showBoard && displayState.foldWinWinnerId === myId && !displayState.revealedPlayerIds.includes(myId);
   const isWaitingOnOpponentDecision =

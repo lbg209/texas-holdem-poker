@@ -90,6 +90,7 @@ public class GameEngine {
         room.getVoluntarilyRevealedIds().clear();
         room.setHeadsUpShowdown(false);
         room.setHeadsUpDeciderPlayerId(null);
+        room.setHeadsUpRevealReadyAtMillis(0);
         pendingHeadsUpShowdownResult = null;
         room.setLastShowdownResult(null);
         room.resetAnteCollected();
@@ -470,8 +471,22 @@ public class GameEngine {
         room.setLastShowdownResult(pendingHeadsUpShowdownResult);
         room.setPhase(Phase.SHOWDOWN);
         room.setHeadsUpDeciderPlayerId(null);
+        room.setHeadsUpRevealReadyAtMillis(0);
         pendingHeadsUpShowdownResult = null;
         onHandConcluded();
+    }
+
+    // 결정권자의 클라이언트가 "상대 카드 공개 연출을 다 봤다"고 신호를 보냈을 때 호출된다. 이미
+    // 기록된 값이 있으면(중복 신호) 무시한다 — 안 그러면 재전송 등으로 타이머가 계속 늘어질 수 있다.
+    // 결정권자 본인이 아니거나 지금 결정 대기 상태가 아니면 조용히 무시한다(관전자나 이미 결정이
+    // 끝난 뒤 늦게 도착한 신호 등).
+    public synchronized void markHeadsUpRevealReady(String playerId) {
+        if (!playerId.equals(room.getHeadsUpDeciderPlayerId())) {
+            return;
+        }
+        if (room.getHeadsUpRevealReadyAtMillis() == 0) {
+            room.setHeadsUpRevealReadyAtMillis(System.currentTimeMillis());
+        }
     }
 
     // 핸드가 실제로 끝나는 시점(finishHandByFold/beginShowdown/finalizeHeadsUpShowdown)에 호출된다.

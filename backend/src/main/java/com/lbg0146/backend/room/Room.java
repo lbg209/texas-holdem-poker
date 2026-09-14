@@ -64,6 +64,12 @@ public class Room {
     // 결정이 끝나면(또는 시간 초과로 강제 처리되면) null로 돌아간다 — "지금 대기 중인지" 자체를
     // 이 값의 null 여부로 판단한다.
     private String headsUpDeciderPlayerId;
+    // 결정권자의 클라이언트가 "상대 카드 공개 연출을 다 봤다"고 신호를 보낸 시각(ms). 0이면 아직
+    // 신호가 안 온 것 — HeadsUpRevealTimerService가 이 값이 채워진 시점부터 실제 결정 제한 시간을
+    // 센다(headsUpDeciderPlayerId가 정해진 시점부터 세면, 그 사람 화면에서 플랍/턴/리버가 순서대로
+    // 열리는 연출이 다 끝나기도 전에 이미 시간이 줄어들어 있는 문제가 있었다). 다음 핸드가 시작되면
+    // 0으로 초기화된다.
+    private long headsUpRevealReadyAtMillis;
     // GAME OVER(생존자 1명) 여부를 "고정"해서 들고 있는 값. GameEngine.checkGameOver()가 핸드
     // 종료 시점에만 세팅하고, resetForRematch()(15초 카운트다운 만료)가 다시 null로 되돌린다 —
     // 그 사이 누가 나가서 인원이 줄어도 이 값 자체는 안 바뀐다(GameEngine.resolveWinnerId 참고).
@@ -341,6 +347,7 @@ public class Room {
         voluntarilyRevealedIds.clear();
         headsUpShowdown = false;
         headsUpDeciderPlayerId = null;
+        headsUpRevealReadyAtMillis = 0;
         gameOverWinnerId = null;
         gameOverWinnerNickname = null;
         anteCollectedThisHand = 0;
@@ -451,6 +458,14 @@ public class Room {
 
     public void setHeadsUpDeciderPlayerId(String headsUpDeciderPlayerId) {
         this.headsUpDeciderPlayerId = headsUpDeciderPlayerId;
+    }
+
+    public long getHeadsUpRevealReadyAtMillis() {
+        return headsUpRevealReadyAtMillis;
+    }
+
+    public void setHeadsUpRevealReadyAtMillis(long headsUpRevealReadyAtMillis) {
+        this.headsUpRevealReadyAtMillis = headsUpRevealReadyAtMillis;
     }
 
     public String getGameOverWinnerId() {

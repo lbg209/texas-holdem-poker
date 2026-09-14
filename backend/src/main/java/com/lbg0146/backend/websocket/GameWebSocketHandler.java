@@ -75,12 +75,25 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             return;
         }
 
+        String playerId = (String) session.getAttributes().get(RoomBroadcaster.PLAYER_ID_ATTRIBUTE);
+
+        // 헤즈업 쇼다운 공개/머크 결정 화면이 실제로 화면에 뜬 순간(연출이 다 끝난 뒤) 프론트가
+        // 보내는 신호 — HeadsUpRevealTimerService가 이 시점부터 진짜 결정 제한 시간을 센다.
+        if ("HEADS_UP_REVEAL_READY".equals(actionMessage.type())) {
+            if (playerId == null) {
+                instance.getBroadcaster().sendError(session, "관전자는 신호를 보낼 수 없습니다.");
+                return;
+            }
+            instance.getGameEngine().markHeadsUpRevealReady(playerId);
+            instance.getBroadcaster().broadcastState();
+            return;
+        }
+
         if (!"ACTION".equals(actionMessage.type())) {
             instance.getBroadcaster().sendError(session, "지원하지 않는 메시지 타입입니다: " + actionMessage.type());
             return;
         }
 
-        String playerId = (String) session.getAttributes().get(RoomBroadcaster.PLAYER_ID_ATTRIBUTE);
         if (playerId == null) {
             instance.getBroadcaster().sendError(session, "관전자는 액션을 보낼 수 없습니다.");
             return;

@@ -111,14 +111,28 @@ export function useRoomSocket(
   // 사용자 입장에서는 "버튼이 안 눌리는" 것처럼만 보이고 원인을 알 방법이 없었다. 대신 전송
   // 성공 여부를 반환해서, 호출하는 쪽(RoomContext)이 실패 시 에러를 보여주고 재연결을 시도할 수
   // 있게 한다.
-  const sendAction = useCallback((action: PlayerActionType, amount: number): boolean => {
+  const sendRaw = useCallback((payload: object): boolean => {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
-      socket.send(JSON.stringify({ type: 'ACTION', action, amount }));
+      socket.send(JSON.stringify(payload));
       return true;
     }
     return false;
   }, []);
 
-  return { connectionStatus, sendAction, reconnect };
+  const sendAction = useCallback(
+    (action: PlayerActionType, amount: number): boolean => sendRaw({ type: 'ACTION', action, amount }),
+    [sendRaw],
+  );
+
+  // 헤즈업 쇼다운 공개/머크 결정 패널이 실제로 화면에 뜬 순간(카드 공개 연출이 다 끝난 뒤)에만
+  // 호출된다 — 서버가 이 신호를 받은 시점부터 진짜 결정 제한 시간을 센다. 백엔드가 모든 클라이언트
+  // 메시지를 같은 봉투(ActionMessage: type/action/amount)로 파싱하므로, action/amount를 생략하면
+  // 파싱 자체가 실패해서 "메시지 형식이 올바르지 않습니다" 에러로 튕겨나간다 — 명시적으로 채워 보낸다.
+  const sendHeadsUpRevealReady = useCallback(
+    (): boolean => sendRaw({ type: 'HEADS_UP_REVEAL_READY', action: null, amount: 0 }),
+    [sendRaw],
+  );
+
+  return { connectionStatus, sendAction, sendHeadsUpRevealReady, reconnect };
 }

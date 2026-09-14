@@ -182,6 +182,9 @@ interface RoomContextValue {
   revealHand: () => Promise<void>;
   decideReveal: (reveal: boolean) => Promise<void>;
   sendAction: (action: PlayerActionType, amount: number) => void;
+  // 헤즈업 쇼다운 공개/머크 결정 패널이 화면에 뜬 순간(ShowdownDecisionPanel)에만 호출된다 —
+  // 자세한 이유는 useRoomSocket.sendHeadsUpRevealReady 참고.
+  sendHeadsUpRevealReady: () => void;
   reconnect: () => void;
   refreshState: () => Promise<void>;
   clearError: () => void;
@@ -275,7 +278,12 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // roomCode가 null이면(로비에 있는 동안) WebSocket 자체를 연결하지 않는다 — useRoomSocket 참고.
-  const { connectionStatus, sendAction: rawSendAction, reconnect } = useRoomSocket(state.roomCode, state.myPlayerId, handleWsMessage);
+  const {
+    connectionStatus,
+    sendAction: rawSendAction,
+    sendHeadsUpRevealReady,
+    reconnect,
+  } = useRoomSocket(state.roomCode, state.myPlayerId, handleWsMessage);
   const { displayState, activeVisualEvent, dealProgress } = useTableAnimationQueue(state.roomState);
 
   // 소켓이 아직 준비되지 않은 상태에서 액션을 보내려 하면(재연결 중 등) 예전엔 조용히
@@ -550,6 +558,7 @@ export function RoomProvider({ children }: { children: ReactNode }) {
         revealHand,
         decideReveal,
         sendAction,
+        sendHeadsUpRevealReady,
         reconnect,
         refreshState,
         clearError,
