@@ -12,9 +12,15 @@ import { HandHistoryToggle } from './components/table/HandHistoryToggle';
 import { BlindStructureToggle } from './components/table/BlindStructureToggle';
 import { HandRankToggle } from './components/table/HandRankToggle';
 import { unlockAudio } from './lib/sounds';
+import { useAutoScale } from './lib/useAutoScale';
+
+// PokerTable의 max-w-4xl(896px) / aspect-[16/10] 기준 "스케일 1"일 때의 실제 크기.
+const TABLE_DESIGN_WIDTH = 896;
+const TABLE_DESIGN_HEIGHT = 560;
 
 function RoomGate() {
   const { state } = useRoom();
+  const { containerRef: tableStageRef, scale: tableScale } = useAutoScale(TABLE_DESIGN_WIDTH, TABLE_DESIGN_HEIGHT);
 
   if (state.isVerifying) {
     return <p className="mt-24 text-center text-slate-400">확인 중...</p>;
@@ -44,12 +50,20 @@ function RoomGate() {
       <TableHeader />
       {state.displayState && (
         <>
-          <PokerTable
-            displayState={state.displayState}
-            activeVisualEvent={state.activeVisualEvent}
-            dealProgress={state.dealProgress}
-            myPlayerId={state.myPlayerId}
-          />
+          {/* PokerTable 자체는 w-full max-w-4xl라 좁은 화면에선 이미 잘 줄어드는데, 그보다 넓은
+              화면(QHD 모니터 등)에서는 896px 위로 못 커져서 화면 대부분이 빈 초록 배경만 남는
+              문제가 있었다. useAutoScale이 여유 공간을 재서 그 비율만큼 통째로 확대한다 — 좌석
+              위치가 %기반이라 내부 요소가 다 같이 비율대로 커진다. */}
+          <div ref={tableStageRef} className="w-full">
+            <div style={{ transform: `scale(${tableScale})`, transformOrigin: 'top center' }}>
+              <PokerTable
+                displayState={state.displayState}
+                activeVisualEvent={state.activeVisualEvent}
+                dealProgress={state.dealProgress}
+                myPlayerId={state.myPlayerId}
+              />
+            </div>
+          </div>
           {/* 아직 좌석을 고르지 않은 관전자에게는 액션/쇼다운 결정 패널이 의미가 없으니 숨긴다. */}
           {state.myPlayerId && (
             <>
