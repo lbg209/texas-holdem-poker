@@ -348,6 +348,9 @@ export function PlayerSeat({
                   나가기 예약
                 </span>
               ) : (
+                // showCards가 true면(핸드가 실제로 진행 중이면) 레디 여부가 지금 당장은 의미가
+                // 없으니(다음 핸드에나 반영됨) 대기 화면에서만 보여준다.
+                !showCards &&
                 player.ready && (
                   <span className="ml-1 rounded bg-emerald-600 px-1 text-[10px] text-white" title="다음 핸드 자동 시작에 동의함">
                     READY
