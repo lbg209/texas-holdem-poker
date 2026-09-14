@@ -70,14 +70,17 @@ REST는 "매 순간 진행형 상태가 아닌, 요청-응답으로 충분한 �
 
 | Method | Path | 설명 |
 |---|---|---|
-| GET | `/api/rooms` | 로비 방 목록(비공개방 포함, 방마다 `roomCode`/이름/공개여부/인원/진행상태) |
-| POST | `/api/rooms` | 방 생성(이름/공개여부/비밀번호/시작칩/빅블라인드/최대인원). 만든 사람을 자동으로 입장시키지는 않는다 |
+| GET | `/api/rooms` | 로비 방 목록(비공개방 포함, 방마다 `roomCode`/이름/공개여부/인원/진행상태/시작칩/빅블라인드) |
+| POST | `/api/rooms` | 방 생성(이름/공개여부/비밀번호/시작칩/빅블라인드). 좌석 수는 항상 6인 고정이라 파라미터가 없다. 만든 사람을 자동으로 입장시키지는 않는다 |
 | GET | `/api/rooms/{roomCode}` | 방 상태 조회. `playerId` 쿼리 파라미터로 본인 시점 조회, 생략 시 관전자 시점 |
-| POST | `/api/rooms/{roomCode}/players` | 방 참가. `{"nickname", "authToken", "password"}` — 비공개방은 비밀번호가 맞아야 한다 |
+| POST | `/api/rooms/{roomCode}/players` | 방 참가. `{"nickname", "authToken", "password", "seatIndex"}` — 비공개방은 비밀번호가 맞아야 한다. `seatIndex`를 생략하면 빈 좌석 중 가장 낮은 번호에 자동으로 앉는다 |
 | POST | `/api/rooms/{roomCode}/players/by-code` | roomCode를 직접 입력해서 참가("코드로 입장") — 비밀번호를 검사하지 않는다 |
+| POST | `/api/rooms/{roomCode}/players/{playerId}/seat` | 이미 앉아있는 플레이어가 다른 빈 좌석으로 이동(`seatIndex` 쿼리 파라미터). 핸드 진행 중이거나 너무 빠르게 연속으로 시도하면 거부 |
+| POST | `/api/rooms/{roomCode}/players/{targetId}/kick` | 방장이 레디 안 한 플레이어를 강퇴(`requesterId` 쿼리 파라미터) |
 | POST | `/api/rooms/{roomCode}/hands` | 새 핸드 시작(디버깅용 — 프론트는 레디 시스템의 자동 시작으로 대체해서 안 씀) |
 | POST | `/api/rooms/{roomCode}/ready` | 다음 핸드 자동 시작 동의 토글 |
 | POST | `/api/rooms/{roomCode}/leave` | 나가기 예약/취소 |
+| GET | `/api/rooms/{roomCode}/history` | 최근 핸드 히스토리(최대 30개, 최신순). `playerId` 쿼리 파라미터로 본인 시점 공개 규칙 적용 |
 | POST | `/api/rooms/{roomCode}/reveal` | 폴드승 승자의 자원 카드 공개 |
 | POST | `/api/rooms/{roomCode}/showdown-decision` | 헤즈업 쇼다운 공개/머크 결정 |
 | POST | `/api/auth/register` | 회원가입(username/password/nickname) |
@@ -163,6 +166,26 @@ STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록
 
 비공개방(`isPrivate`+`password`, 평문 저장 — 계정 비밀번호와 달리 파티룸 PIN 수준의 민감도로 판단)도 로비 목록에는 노출되고(🔒 표시는 프론트 책임), 일반 입장(`POST /api/rooms/{roomCode}/players`)만 비밀번호를 검사한다. roomCode를 직접 입력해서 들어오는 "코드로 입장"(`POST /api/rooms/{roomCode}/players/by-code`)은 비밀번호를 검사하지 않는다 — roomCode를 안다는 것 자체를 초대로 간주한 것이다(단, `GET /api/rooms` 응답 자체에 모든 방의 roomCode가 항상 포함되므로, 이건 암호학적 보호가 아니라 "실수로/장난으로 들어오는 것"만 막는 수준이라는 걸 인지하고 내린 결정이다).
 
+### 18. 핸드 히스토리
+
+DB에 저장하지 않고 방(`RoomInstance`)이 살아있는 동안만 메모리에 최근 30개 핸드(`Deque<HandHistoryEntry>`, `addFirst`+오래된 것부터 `removeLast`)를 유지한다 — UI 자체가 "방 안에서 켜고 끄는 패널"이라 영구 저장과는 안 맞다고 판단했다. 핸드가 실제로 끝나는 3개 지점(`finishHandByFold`/`beginShowdown`/`finalizeHeadsUpShowdown`)에서 공통으로 거치는 `GameEngine.onHandConcluded()`가 `HandHistoryEntry.capture()`로 캡처한다. 공개 규칙은 실시간 쇼다운과 완전히 동일한 기준(본인 카드 항상 공개, 헤즈업 머크는 영원히 비공개)을 `HandHistoryMapper`가 그대로 재사용한다 — 과거 핸드라고 별도 규칙을 만들지 않았다.
+
+### 19. 블라인드 상승 + 앤티
+
+시간이 아니라 **핸드 수 기준**으로 15판마다 다음 레벨로 오른다. 시작 빅블라인드 대비 배율(1x→1.5x→2x→3x→4x→5x) 6단계가 고정 스케줄이며, 마지막 레벨 이후로는 더 오르지 않는다. 앤티는 전원이 소액씩 나눠 내는 옛날 방식이 아니라 **빅블라인드 앤티**(2018년부터 WSOP 등이 채택한 방식) — 빅블라인드 자리에 앉은 사람 한 명만 그 레벨 빅블라인드와 같은 금액을 추가로 낸다. 실제 대회(JOPT 등) 구조표를 확인해, 레벨 1부터 걷히도록 맞췄다.
+
+**실사용 중 발견된 핵심 버그**: 앤티를 `Player.totalHandContribution`(사이드팟 계산 기준값)에 그대로 반영했더니, 앤티를 낸 사람만 기여금이 더 많아 보여서 `PotCalculator`가 이를 진짜 올인/사이드팟 상황으로 착각해 **앤티 낸 사람만 가져가는 가짜 사이드팟**이 매 핸드 생겼다. `Player.payAnte()`가 `totalHandContribution`을 건드리지 않고 실제로 낸 금액만 반환하도록 고치고, `Room.anteCollectedThisHand`로 별도 추적했다가 `PotCalculator.calculate(players, deadMoney)` 오버로드로 항상 메인팟(eligiblePlayerIds가 가장 넓은 팟)에만 통째로 더하는 방식으로 해결했다.
+
+### 20. 방장 배지 + 강퇴
+
+방장 = 방을 만든 뒤 가장 먼저 입장한 사람(`Room.ownerId`). 방장이 나가면 남은 사람 중 입장 시각(`Player.joinedAtMillis`)이 가장 빠른 사람에게 자동 승계한다. 강퇴(`GameEngine.kickPlayer`) 가능 조건은 **핸드 진행 중이 아니고, 대상이 레디 안 한 상태로 3초 이상 지났을 때**뿐이다(`Player.isKickEligible`) — "이기고 진 것과 무관하게" 레디 여부만으로 판단되어 악용 여지가 자연히 줄어든다고 보고, 투표 방식은 기각했다. 핸드가 진행되는 동안 레디 안 한 시간이 이미 3초를 넘겨 있어도 핸드가 막 끝나자마자 바로 강퇴되지 않도록, 핸드 종료 시점마다 강퇴 유예 시계를 다시 리셋한다(`resetKickClockForIdlePlayers`).
+
+### 21. 고정 좌석제
+
+방을 항상 **6인 고정 좌석**으로 통일했다(이전엔 방 생성 시 2~6명 중 선택 가능했음). `Player.seatIndex`(물리적 좌석 번호)를 추가하고, `Room.players` 리스트를 항상 `seatIndex` 오름차순으로 유지되도록 관리 — 기존에 "리스트 순서 = 좌석 순서"를 가정하고 짜여 있던 버튼 이동/블라인드 배정 로직을 그대로 재사용할 수 있었다(리스트 정렬 기준만 "입장 순서"에서 "좌석 번호"로 바뀐 셈). 빈 좌석 클릭 시 `Room.addPlayer(player, seatIndex)`로 명시적으로 앉거나 `Room.moveSeat(playerId, newSeatIndex)`로 옮기며, 서버가 그 좌석이 실제로 비어있는지 요청 처리 시점에 재검증해 동시 클릭 경쟁을 막는다.
+
+좌석 재배치로 리스트 순서가 바뀌면 인덱스 기반인 딜러 버튼(`dealerButtonPosition`)이 엉뚱한 사람을 가리킬 수 있다 — 기존 나가기 로직(`removeLeavingPlayers`)이 이미 쓰던 패턴과 똑같이, 재정렬 전에 "버튼을 쥔 사람(객체)"을 기억해뒀다가 재정렬 후 그 사람의 새 인덱스로 보정한다(`resortSeatsPreservingButton`). 방장 승계도 더 이상 "리스트 맨 앞"으로 판단할 수 없어(좌석을 옮기면 순서가 바뀜) `Player.joinedAtMillis` 기준으로 분리했다.
+
 ## 주요 설계 결정
 
 - **기능별 패키지 구조**: controller/service/repository 같은 역할별 계층 대신 `card`/`hand`/`player`/`room`/`game`처럼 기능 단위로 나눴다. 도메인 로직(`card`~`game`)은 Spring을 참조하지 않아 순수 JUnit으로 검증할 수 있고, `room.controller`/`websocket`만 프레임워크 계층을 안다.
@@ -174,6 +197,8 @@ STOMP 대신 **Raw WebSocket**(`TextWebSocketHandler`)을 `/ws` 경로에 등록
 - **폴드 조기 종료 시 베팅 라운드 상태를 명시적으로 정리**: 전원 폴드로 핸드가 끝나면 `currentBettingRound`를 `null`로 비운다. 그대로 두면 이미 끝난 라운드의 `currentActorId`/`currentBet`이 응답에 남아, 아직 액션 안 한 플레이어 화면에 "내 차례"인 것처럼 잘못 보이는 문제가 있었다.
 - **스케줄러 3종(턴 타이머/자동 시작/헤즈업 공개 결정)이 같은 패턴을 공유**: `TurnTimerService`/`AutoStartService`/`HeadsUpRevealTimerService` 모두 "상태 브로드캐스트마다 조건이 실제로 바뀌었을 때만 다시 예약하고, 타이머 만료 시 예약 시점의 스냅샷과 지금 상태를 비교해서 여전히 유효할 때만 실행"하는 동일한 구조다. `GameEngine`은 스케줄러의 존재 자체를 모르고(순수 도메인 로직만 노출), 이 서비스들도 `GameEngine` 외에는 아무것도 몰라서 순환 의존이 생기지 않는다.
 - **쇼다운을 "계산"과 "지급" 두 단계로 분리**: 헤즈업 머크(13번)를 지원하려면 승자를 안 시점과 실제로 팟을 지급하는 시점이 달라야 한다. 기존엔 `resolveShowdown()` 하나가 계산과 지급을 동시에 했는데, 이를 `computeShowdownResult()`(순수 계산)와 `awardPots()`(칩 지급)로 쪼갠 뒤 `resolveShowdown()`은 둘을 이어서 호출하는 얇은 래퍼로 남겨서, 3명 이상 쇼다운/기존 테스트는 동작 변경 없이 그대로 통과한다.
+- **"죽은 돈"(데드머니)은 팟 계산과 분리해서 다룬다**: 앤티처럼 특정 플레이어 소유가 아니라 팟 전체에 속하는 금액은 `Player.totalHandContribution`(사이드팟 레벨 판단 기준)에 절대 섞지 않는다(19번 참고). `PotCalculator.calculate(players, deadMoney)`처럼 "정상적인 기여금 계산"과 "추가로 얹을 죽은 돈"을 별도 파라미터로 나눠서, 사이드팟 판단 로직 자체는 전혀 건드리지 않고 결과 팟에만 안전하게 더한다.
+- **좌석 순서 기반 로직을 "리스트 정렬 기준"만 바꿔서 재사용**: 고정 좌석제(21번) 도입 시, 버튼 이동/블라인드 배정처럼 "리스트 순서 = 좌석 순서"를 가정하던 기존 로직을 전부 새로 짜는 대신, `Room.players`가 항상 `seatIndex` 오름차순을 유지하도록만 보장했다. 정렬 기준이 "입장 순서"에서 "물리적 좌석 번호"로 바뀐 것뿐이라, 기존 오프셋 계산 코드는 단 한 줄도 안 고쳤다.
 
 ## 예외 처리 구조
 
@@ -198,20 +223,21 @@ WebSocket 계층은 연결을 끊지 않고, 문제를 일으킨 세션에만 `{
 
 ## 테스트 현황
 
-JUnit 5 기준 총 **123개** 테스트, 전부 통과.
+JUnit 5 기준 총 **161개** 테스트, 전부 통과.
 
 | 대상 | 파일 | 개수 |
 |---|---|---|
 | 카드/덱 | `DeckTest` | 4 |
 | 족보 판정 | `HandEvaluatorTest` | 15 |
-| 플레이어 | `PlayerTest` | 4 |
-| 방 (설정 검증, 나가기 좌석 정리, 계정 중복 입장 방지 포함) | `RoomTest` | 13 |
+| 플레이어 (앤티 납부, 좌석 이동 가능 여부 포함) | `PlayerTest` | 8 |
+| 방 (설정 검증, 나가기 좌석 정리, 계정 중복 입장 방지, 좌석 배정/이동, 방장 승계, 블라인드 레벨/앤티, 핸드 히스토리 보관 포함) | `RoomTest` | 28 |
 | 베팅 라운드 (short all-in, 100단위 검증 포함) | `BettingRoundTest` | 7 |
-| 사이드팟 계산 | `PotCalculatorTest` | 2 |
-| 핸드 오케스트레이션 (odd chip rule, zero-chip 방지, 턴 타이머, 레디/자동시작, 헤즈업 머크, 나가기 유예, GAME OVER 리매치, 방 설정 포함) | `GameEngineTest` | 35 |
+| 사이드팟 계산 (데드머니/앤티 분리 포함) | `PotCalculatorTest` | 4 |
+| 핸드 오케스트레이션 (odd chip rule, zero-chip 방지, 턴 타이머, 레디/자동시작, 헤즈업 머크, 나가기 유예, GAME OVER 리매치, 방 설정, 강퇴, 좌석 이동, 블라인드 상승/앤티 포함) | `GameEngineTest` | 49 |
 | 동시성 | `GameEngineConcurrencyTest` | 3 |
 | REST API (멀티룸 생성/목록/입장/비공개방/자동삭제, 쇼다운 노출, 헤즈업 공개 결정 흐름 포함) | `RoomControllerTest` | 23 |
 | 쇼다운 승자 판정(사이드팟 엣지케이스) | `RoomStateMapperTest` | 2 |
+| 핸드 히스토리 공개 규칙 | `HandHistoryMapperTest` | 3 |
 | WebSocket 프로토콜 (roomCode 기반 연결, 관전자, 거부 케이스 포함) | `GameWebSocketHandlerTest` | 6 |
 | 로그인/인증 | `AuthControllerTest` | 8 |
 | Spring 컨텍스트 로딩 | `BackendApplicationTests` | 1 |
@@ -221,12 +247,13 @@ JUnit 5 기준 총 **123개** 테스트, 전부 통과.
 ## 아직 구현하지 않은 것 (의도적으로 미룸)
 
 - **재접속(reconnect) 시 상태 복구**: 연결이 끊기면 세션이 그냥 해제될 뿐, 서버가 별도로 기억해두는 건 없다(프론트엔드가 재연결 시 새 WebSocket 연결로 최신 상태를 다시 받는 방식으로 대응). 다만 턴 타임아웃(위 10번)이 응답 없는 플레이어를 자동 폴드시키므로, 연결이 끊긴 사람 때문에 게임이 무한정 멈추는 문제 자체는 이미 해소되어 있다. 연결 끊김 자체를 감지해서 일정 시간 뒤 좌석에서 자동 제거하는 기능(수동 "나가기"와 별개)은 아직 없다.
-- **닉네임 중복 방지**: 같은 방에 같은 닉네임으로 여러 명이 들어올 수 있다. 화면에는 닉네임만 보이고(게임 시작 전엔 좌석 배지도 없음) 서로 다른 `playerId`인 두 사람을 구분할 방법이 없다.
+- **닉네임 중복 방지**: 같은 방에 같은 닉네임으로 여러 명이 들어올 수 있다. 고정 좌석제(21번) 도입 후 좌석마다 고정 색 점이 붙어 어느 정도 구분은 되지만, 이름 자체가 겹치는 걸 막는 서버 검증은 없다.
 - **게임 진행 중 중간 입장 시 스택 불균형**: 새로 입장하면 그 시점의 평균이 아니라 방의 시작 칩 그대로 받는다(토너먼트 레이트 레지스트레이션과 구조적으로 같음). "게임 시작 후 입장 금지" 옵션은 아직 없다 — 의도적으로 허용할지 막아야 할지 고민 중.
 - **중간 입장자의 참여 시점**: 지금은 핸드 진행 중에 들어와도 곧바로 다음 핸드부터 자동 참여한다. "입장은 되지만 다음 핸드까지는 관전만" 하는 정책은 아직 없다.
 - **3명 이상 쇼다운의 순서대로 머크**: 지금 머크(13번)는 정확히 2명이 겨루는 경우만 지원한다. 실제 포커는 마지막 액션자부터 순서대로 공개/머크를 묻고 머크하면 실제로 팟을 포기하는데, 이 "진짜" 규칙까지는 캐주얼한 MVP에 안 맞다고 판단해 보류했다.
-- **핸드 히스토리**: 방금 핸드가 어떻게 끝났는지 다시 볼 방법이 없다. DB는 이제 있지만(User 영속화용) 별도 히스토리 테이블 설계가 아직 없다.
-- **방장 뱃지 / 블라인드 상승·앤티 / 대회 입장권(티켓) 시스템**: 전부 논의만 하고 구현은 보류했다.
+- **개별 앤티 옵션**: 지금은 "빅블라인드 앤티"(19번) 한 방식만 지원한다. 전원이 소액씩 나눠 내는 옛날 방식은 여러 명이 동시에 숏스택으로 앤티를 못 내는 경우까지 사이드팟 계산에 얽혀 엣지케이스가 늘어나서 보류했다.
+- **대회 입장권(티켓) 시스템**: 계정에 하루 한 번 티켓이 생성되고 방 입장 시 소모하는 방식을 논의했으나, 구현 여부 자체가 아직 결정되지 않았다.
+- **로그인 토큰의 클라이언트 영속화**: 토큰이 서버 메모리에만 있어서 새로고침하면 재로그인이 필요하다(게스트 닉네임은 프론트 `sessionStorage`로 이미 영속화됨 — 아래 frontend/README.md 참고).
 
 ## Claude Code와 함께 개발
 
