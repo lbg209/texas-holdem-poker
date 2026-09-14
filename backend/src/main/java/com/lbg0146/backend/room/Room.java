@@ -203,6 +203,12 @@ public class Room {
         if (firstPlayer) {
             ownerId = player.getId();
         }
+        // 핸드가 진행 중일 때(phase가 있고 SHOWDOWN도 아님) 새로 들어온 사람은 이번 핸드를 딜받지
+        // 않았으므로, GameEngine이 "이번 핸드에 아직 남아있는 사람"으로 잘못 세지 않도록 표시해둔다
+        // — 다음 핸드가 시작되면(resetForNewHand) 자동으로 풀린다.
+        if (phase != null && phase != Phase.SHOWDOWN) {
+            player.sitOutThisHand();
+        }
     }
 
     // 이미 앉아있는 플레이어가 다른 빈 좌석으로 옮긴다. 핸드 진행 중 제한/연타 방지 등 정책 판단은

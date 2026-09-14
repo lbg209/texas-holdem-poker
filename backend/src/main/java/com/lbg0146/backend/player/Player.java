@@ -54,6 +54,12 @@ public class Player {
     // 마지막으로 좌석을 옮긴 시각(ms). 너무 빠르게 연속으로 자리를 옮기는 것을 막는 데 쓰인다
     // (GameEngine.requestSeatMove 참고). 기본값 0이라 첫 이동은 항상 허용된다.
     private long lastSeatChangeAtMillis;
+    // 이번 핸드에 참여하지 않고 구경만 하는 중인지. 기본값은 false(참여)이고, 핸드가 진행 중일 때
+    // 새로 입장한 경우에만 Room.addPlayer가 true로 표시한다 — 그런 플레이어는 폴드한 적도 없이
+    // 기본 상태가 ACTIVE라서, 이 플래그가 없으면 "이번 핸드에 아직 남아있는 사람" 집계(폴드승 판정/
+    // 쇼다운 대상자 선정 등)에 잘못 끼어들어 실제로 딜받지 않은 핸드의 승부에 참여하게 되는 버그가
+    // 있었다(GameEngine.isInCurrentHand 참고). resetForNewHand()가 다음 핸드 시작 시 다시 풀어준다.
+    private boolean sittingOutThisHand;
 
     public Player(String id, String nickname, int chips) {
         this(id, nickname, chips, null);
@@ -127,6 +133,7 @@ public class Player {
         chipsAtHandStart = chips;
         holeCards.clear();
         autoFolded = false;
+        sittingOutThisHand = false;
     }
 
     public void receiveHoleCard(Card card) {
@@ -222,5 +229,14 @@ public class Player {
 
     public void markSeatChanged() {
         this.lastSeatChangeAtMillis = System.currentTimeMillis();
+    }
+
+    public boolean isSittingOutThisHand() {
+        return sittingOutThisHand;
+    }
+
+    // 핸드 진행 중에 새로 입장했을 때만 Room.addPlayer가 호출한다.
+    public void sitOutThisHand() {
+        this.sittingOutThisHand = true;
     }
 }

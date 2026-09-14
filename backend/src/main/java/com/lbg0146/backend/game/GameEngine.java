@@ -186,11 +186,24 @@ public class GameEngine {
         List<Player> ordered = new ArrayList<>();
         for (int i = 0; i < seatCount; i++) {
             Player player = players.get((base + i) % seatCount);
-            if (player.getStatus() == PlayerStatus.ACTIVE) {
+            // 핸드 도중 새로 입장한 플레이어(sittingOutThisHand)는 이번 핸드의 딜을 받은 적이 없으니
+            // 다음 스트리트 액션 순서에도 끼면 안 된다 — 실사용 중 발견된 버그.
+            if (player.getStatus() == PlayerStatus.ACTIVE && !player.isSittingOutThisHand()) {
                 ordered.add(player);
             }
         }
         return ordered;
+    }
+
+    // "이번 핸드에서 아직 승부 중인지"(폴드승 판정/쇼다운 대상자 선정에 공통으로 쓰는 기준). 폴드나
+    // 파산은 당연히 제외하고, 핸드 도중 새로 입장한 플레이어(sittingOutThisHand)도 이번 핸드를
+    // 딜받은 적이 없으므로 제외한다 — 안 그러면 이 플래그가 기본 ACTIVE라서 "아직 안 죽은 사람"으로
+    // 잘못 집계되어 폴드승이 안 터지거나(남은 인원 수를 부풀림) 쇼다운에 낀 적 없는 핸드로 참여해버리는
+    // 버그가 있었다.
+    private boolean isInCurrentHand(Player player) {
+        return player.getStatus() != PlayerStatus.FOLDED
+                && player.getStatus() != PlayerStatus.BUSTED
+                && !player.isSittingOutThisHand();
     }
 
     // 턴 타이머가 만료됐을 때 호출된다. 타이머를 예약한 시점의 BettingRound 인스턴스/액션자와
@@ -225,7 +238,7 @@ public class GameEngine {
         }
 
         long remaining = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
+                .filter(this::isInCurrentHand)
                 .count();
         if (remaining <= 1) {
             // 전원 폴드로 한 명만 남으면 쇼다운 없이 즉시 핸드를 종료한다.
@@ -241,7 +254,7 @@ public class GameEngine {
     private void finishHandByFold() {
         room.setPots(PotCalculator.calculate(room.getPlayers(), room.getAnteCollectedThisHand()));
         Player winner = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
+                .filter(this::isInCurrentHand)
                 .findFirst()
                 .orElseThrow();
         int totalPot = room.getPots().stream().mapToInt(Pot::amount).sum();
@@ -306,7 +319,7 @@ public class GameEngine {
     // 구현하지 않고) 기존 그대로 즉시 전원 공개하고 확정한다.
     private void beginShowdown() {
         List<Player> inHand = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
+                .filter(this::isInCurrentHand)
                 .toList();
 
         if (inHand.size() == 2) {
@@ -395,7 +408,7 @@ public class GameEngine {
     // 그대로 쓴다. 헤즈업 지연 흐름만 compute/award를 분리해서 그 사이에 결정을 기다린다.
     public ShowdownResult resolveShowdown() {
         List<Player> inHand = room.getPlayers().stream()
-                .filter(p -> p.getStatus() != PlayerStatus.FOLDED && p.getStatus() != PlayerStatus.BUSTED)
+                .filter(this::isInCurrentHand)
                 .toList();
         ShowdownResult result = computeShowdownResult(inHand);
         awardPots(result);

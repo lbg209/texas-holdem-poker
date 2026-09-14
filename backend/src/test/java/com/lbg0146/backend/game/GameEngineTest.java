@@ -129,6 +129,34 @@ class GameEngineTest {
     }
 
     @Test
+    void 핸드_도중_입장한_플레이어는_폴드승_인원_집계에서_제외된다() {
+        Room room = new Room();
+        room.addPlayer(new Player("p1", "P1", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p2", "P2", Room.STARTING_CHIPS));
+        room.addPlayer(new Player("p3", "P3", Room.STARTING_CHIPS));
+        GameEngine engine = new GameEngine(room);
+
+        engine.startHand(); // 버튼=p1, SB=p2, BB=p3, 프리플랍 첫 액션=p1
+        engine.applyAction("p1", PlayerAction.CALL, 0);
+        engine.applyAction("p2", PlayerAction.CALL, 0);
+        engine.applyAction("p3", PlayerAction.CHECK, 0);
+        assertEquals(Phase.FLOP, room.getPhase());
+
+        // 핸드가 진행되는 도중 새로 입장 — 이번 핸드는 딜을 받지 않았다.
+        room.addPlayer(new Player("p4", "P4", Room.STARTING_CHIPS));
+
+        // p2(플랍 첫 액션자)와 p3가 폴드하면, 원래 이 핸드에 있던 p1 혼자 남아 즉시 폴드승으로
+        // 끝나야 한다 — p4가 "아직 안 죽은 사람"으로 잘못 집계되어 턴/리버까지 계속 진행되면 버그다.
+        engine.applyAction("p2", PlayerAction.FOLD, 0);
+        engine.applyAction("p3", PlayerAction.FOLD, 0);
+
+        assertEquals(Phase.SHOWDOWN, room.getPhase());
+        assertTrue(room.isWonByFold());
+        assertEquals(3, room.getCommunityCards().size()); // 턴/리버로 안 밀리고 플랍에서 바로 종료돼야 함
+        assertTrue(room.findPlayer("p4").getHoleCards().isEmpty());
+    }
+
+    @Test
     void 쇼다운에서_더_높은_족보가_팟_전체를_가져간다() {
         Room room = new Room();
         Player a = new Player("a", "A", 10_000);
