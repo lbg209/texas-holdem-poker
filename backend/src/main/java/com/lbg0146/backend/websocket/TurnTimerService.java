@@ -18,7 +18,7 @@ import java.util.concurrent.atomic.AtomicReference;
 // Spring 빈이 아니다 — 방(RoomInstance)마다 하나씩 직접 생성해서 들고 있는다.
 public class TurnTimerService {
 
-    public static final int TURN_LIMIT_SECONDS = 60;
+    public static final int TURN_LIMIT_SECONDS = 30;
 
     private final ScheduledExecutorService executor = Executors.newSingleThreadScheduledExecutor();
     private final AtomicReference<ScheduledFuture<?>> pending = new AtomicReference<>();

@@ -5,7 +5,7 @@ import { useCountdownSeconds } from '../../lib/useCountdownSeconds';
 import { BetBuilder } from './BetBuilder';
 
 // 백엔드 TurnTimerService.TURN_LIMIT_SECONDS와 맞춘 값 — 진행바 비율 계산에만 쓰인다.
-const TURN_LIMIT_SECONDS = 60;
+const TURN_LIMIT_SECONDS = 30;
 const URGENT_SECONDS_THRESHOLD = 10;
 
 export function ActionBar() {
