@@ -54,15 +54,17 @@ export function ActionBar() {
         </div>
       )}
       <div className="flex flex-wrap justify-end gap-2">
+        {/* min-w로 폴드/체크/콜/올인 버튼 너비를 통일한다 — 안 그러면 "콜 1,500"/"올인 50,000"처럼
+            글자 길이가 다른 라벨 때문에 버튼마다 크기가 제각각으로 보인다. */}
         <button
-          className="rounded bg-gradient-to-b from-red-600 to-red-800 px-4 py-2 text-sm shadow-md active:shadow-inner"
+          className="min-w-24 rounded bg-gradient-to-b from-red-600 to-red-800 px-4 py-2 text-center text-sm shadow-md active:shadow-inner"
           onClick={() => sendAction('FOLD', 0)}
         >
           폴드
         </button>
         {legal.canCheck && (
           <button
-            className="rounded bg-gradient-to-b from-slate-500 to-slate-700 px-4 py-2 text-sm shadow-md active:shadow-inner"
+            className="min-w-24 rounded bg-gradient-to-b from-slate-500 to-slate-700 px-4 py-2 text-center text-sm shadow-md active:shadow-inner"
             onClick={() => sendAction('CHECK', 0)}
           >
             체크
@@ -70,7 +72,7 @@ export function ActionBar() {
         )}
         {legal.canCall && (
           <button
-            className="rounded bg-gradient-to-b from-emerald-600 to-emerald-800 px-4 py-2 text-sm shadow-md active:shadow-inner"
+            className="min-w-24 rounded bg-gradient-to-b from-emerald-600 to-emerald-800 px-4 py-2 text-center text-sm shadow-md active:shadow-inner"
             onClick={() => sendAction('CALL', 0)}
           >
             콜 {formatMoney(legal.callAmount)}
@@ -78,7 +80,7 @@ export function ActionBar() {
         )}
         {legal.canAllIn && (
           <button
-            className="rounded bg-gradient-to-b from-amber-600 to-amber-800 px-4 py-2 text-sm shadow-md active:shadow-inner"
+            className="min-w-24 rounded bg-gradient-to-b from-amber-600 to-amber-800 px-4 py-2 text-center text-sm shadow-md active:shadow-inner"
             onClick={() => sendAction('ALL_IN', 0)}
           >
             올인 {formatMoney(legal.maxTotal)}
