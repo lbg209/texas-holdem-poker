@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { RoomStateResponse } from '../types/room';
-import { deriveSteps } from './tableAnimation';
+import { deriveSteps, RESULT_HOLD_MS } from './tableAnimation';
 import type { ActiveVisualEvent, AnimationStep } from './tableAnimation';
 
 interface TableAnimationQueue {
@@ -26,12 +26,19 @@ export function useTableAnimationQueue(roomState: RoomStateResponse | null): Tab
   const pendingRef = useRef<RoomStateResponse | null>(null);
   const droppedRef = useRef(false);
   const playingRef = useRef(false);
+  // 쇼다운 공개 연출이 끝난 직후 RESULT_HOLD_MS 동안 true — playingRef와 마찬가지로 이 동안
+  // 들어오는 새 상태는 즉시 재생하지 않고 pendingRef에 대기시킨다(아래 holdResult 참고).
+  const holdingResultRef = useRef(false);
   const timeoutRef = useRef<number | null>(null);
+  const holdTimeoutRef = useRef<number | null>(null);
 
   useEffect(
     () => () => {
       if (timeoutRef.current !== null) {
         window.clearTimeout(timeoutRef.current);
+      }
+      if (holdTimeoutRef.current !== null) {
+        window.clearTimeout(holdTimeoutRef.current);
       }
     },
     [],
@@ -52,7 +59,7 @@ export function useTableAnimationQueue(roomState: RoomStateResponse | null): Tab
       return;
     }
 
-    if (playingRef.current) {
+    if (playingRef.current || holdingResultRef.current) {
       if (pendingRef.current !== null) {
         // 이미 대기 중이던 상태를 또 덮어쓴다 = 그 사이 상태 하나는 애니메이션 없이 건너뛰게 된다.
         droppedRef.current = true;
@@ -97,6 +104,25 @@ export function useTableAnimationQueue(roomState: RoomStateResponse | null): Tab
     setDealProgress(null);
     playingRef.current = false;
 
+    if (next.phase === 'SHOWDOWN') {
+      // 쇼다운 공개 연출(카드를 한 장씩 순서대로 뒤집는 스텝들)이 방금 다 끝난 시점이다. 인원이
+      // 많으면 이 연출 자체가 이미 몇 초씩 걸리는데, 그동안 서버가 다음 핸드를 자동으로 시작해서
+      // pendingRef에 새 상태가 먼저 도착해 있는 경우가 많다 — 여기서 바로 consumePending을 부르면
+      // 결과 화면이 뜨자마자(다음 렌더에) 바로 다음 핸드로 넘어가버린다. 공개 연출이 끝난 뒤에도
+      // RESULT_HOLD_MS만큼은 결과를 그대로 붙잡아두고, 그 사이/이후 도착하는 상태는 계속
+      // pendingRef에 쌓아뒀다가 시간이 다 되면 재생한다.
+      holdingResultRef.current = true;
+      holdTimeoutRef.current = window.setTimeout(() => {
+        holdingResultRef.current = false;
+        consumePending();
+      }, RESULT_HOLD_MS);
+      return;
+    }
+
+    consumePending();
+  }
+
+  function consumePending() {
     if (pendingRef.current === null) {
       return;
     }

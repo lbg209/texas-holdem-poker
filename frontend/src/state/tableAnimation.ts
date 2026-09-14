@@ -31,6 +31,13 @@ export interface AnimationStep {
   dealProgress?: Record<string, number> | null;
 }
 
+// 핸드가 끝나면(다음 핸드 자동 시작 여부와 무관하게) 결과를 최소 이만큼은 보여준다. 쇼다운 공개
+// 연출(HOLE_CARD_REVEAL_STEP_MS x 인원수만큼)이 다 끝난 "뒤"에 이 시간을 더 기다리는 것이라, 인원이
+// 많아 공개 연출 자체가 길어져도 결과가 뜨자마자 다음 핸드로 넘어가버리는 일이 없다.
+// useShowBoard(GAME OVER 오버레이 억제)와 useTableAnimationQueue(다음 핸드 재생 보류) 둘 다 이
+// 값을 공유해야 한다 — 하나만 알고 있으면 결과 화면 표시 시간과 실제 데이터 전환 시점이 어긋난다.
+export const RESULT_HOLD_MS = 5_500;
+
 const DEAL_CARD_MS = 200;
 const HOLE_CARD_COUNT = 2;
 // PlayerSeat의 HoleCard 뒤집기 연출(딜레이 150ms + 뒤집기 500ms = 650ms)이 다 끝날 시간을 준다.

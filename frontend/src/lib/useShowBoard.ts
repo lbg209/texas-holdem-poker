@@ -1,13 +1,13 @@
 import { useState } from 'react';
 import type { RoomStateResponse } from '../types/room';
 import { useCountdownSeconds } from './useCountdownSeconds';
+import { RESULT_HOLD_MS } from '../state/tableAnimation';
 
-// 핸드가 끝나면(다음 핸드 자동 시작 여부와 무관하게) 결과를 최소 이만큼은 보여준다 — 그 뒤에도
-// 자동 시작 카운트다운이 안 걸려 있으면(누군가 STOP을 눌러 멈춘 상태) 대기 화면으로 넘어간다.
-// GAME OVER 오버레이도 이 시간만큼은 뜨지 않고 기다린다(아래 resultHoldActive 참고).
-// 백엔드의 핸드 사이 자동 시작 지연(BETWEEN_HANDS_DELAY_SECONDS=5초)보다 살짝 길게 잡아서, 전원
-// 레디 상태로 자연스럽게 이어지는 경우에는 이 창이 끝나기 전에 다음 핸드가 실제로 시작되게 한다.
-const RESULT_HOLD_MS = 5_500;
+// 핸드가 끝나면(다음 핸드 자동 시작 여부와 무관하게) 결과를 최소 RESULT_HOLD_MS만큼은 보여준다 —
+// 그 뒤에도 자동 시작 카운트다운이 안 걸려 있으면(누군가 STOP을 눌러 멈춘 상태) 대기 화면으로
+// 넘어간다. GAME OVER 오버레이도 이 시간만큼은 뜨지 않고 기다린다(아래 resultHoldActive 참고).
+// 실제로 다음 핸드 데이터를 언제부터 재생할지는 useTableAnimationQueue가 같은 상수로 별도로
+// 보류하므로, 여기서는 "결과 화면을 가리지 않는다"는 표시 역할만 한다.
 
 export interface ShowBoardState {
   // "지금 화면에 보드(커뮤니티 카드/팟/좌석 카드/카드 공개 버튼 등 이번 핸드의 잔여물)를 보여줄지".
