@@ -271,8 +271,22 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // roomCode가 null이면(로비에 있는 동안) WebSocket 자체를 연결하지 않는다 — useRoomSocket 참고.
-  const { connectionStatus, sendAction, reconnect } = useRoomSocket(state.roomCode, state.myPlayerId, handleWsMessage);
+  const { connectionStatus, sendAction: rawSendAction, reconnect } = useRoomSocket(state.roomCode, state.myPlayerId, handleWsMessage);
   const { displayState, activeVisualEvent, dealProgress } = useTableAnimationQueue(state.roomState);
+
+  // 소켓이 아직 준비되지 않은 상태에서 액션을 보내려 하면(재연결 중 등) 예전엔 조용히
+  // 무시됐다 — 버튼이 눌리는 것처럼 보이는데 아무 반응이 없는 버그로 이어졌다. 실패 시
+  // 에러를 보여주고 재연결을 바로 시도해, 최소한 원인이 보이고 스스로 복구를 시도하게 한다.
+  const sendAction = useCallback(
+    (action: PlayerActionType, amount: number) => {
+      const sent = rawSendAction(action, amount);
+      if (!sent) {
+        dispatch({ type: 'ERROR_OCCURRED', payload: '연결이 불안정합니다. 재연결을 시도합니다...' });
+        reconnect();
+      }
+    },
+    [rawSendAction, reconnect],
+  );
 
   const enterLobbyAsGuest = (nickname: string) => {
     storeGuestNickname(nickname);

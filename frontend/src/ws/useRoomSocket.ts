@@ -107,11 +107,17 @@ export function useRoomSocket(
     connectRef.current?.();
   }, []);
 
-  const sendAction = useCallback((action: PlayerActionType, amount: number) => {
+  // 소켓이 준비되지 않은 상태(재연결 중 등)에서 호출되면 이전엔 조용히 무시됐는데, 그러면
+  // 사용자 입장에서는 "버튼이 안 눌리는" 것처럼만 보이고 원인을 알 방법이 없었다. 대신 전송
+  // 성공 여부를 반환해서, 호출하는 쪽(RoomContext)이 실패 시 에러를 보여주고 재연결을 시도할 수
+  // 있게 한다.
+  const sendAction = useCallback((action: PlayerActionType, amount: number): boolean => {
     const socket = socketRef.current;
     if (socket && socket.readyState === WebSocket.OPEN) {
       socket.send(JSON.stringify({ type: 'ACTION', action, amount }));
+      return true;
     }
+    return false;
   }, []);
 
   return { connectionStatus, sendAction, reconnect };
