@@ -126,7 +126,7 @@ export function HandHistoryToggle() {
   return (
     <div>
       <button
-        className="rounded bg-slate-800/90 px-2 py-1 text-xs text-slate-300 shadow hover:bg-slate-700"
+        className="rounded bg-slate-800/90 px-3 py-1.5 text-sm text-slate-300 shadow hover:bg-slate-700"
         onClick={() => setOpen((prev) => !prev)}
       >
         📜 핸드 히스토리
