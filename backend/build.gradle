@@ -20,6 +20,8 @@ repositories {
 dependencies {
 	implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
 	runtimeOnly 'com.mysql:mysql-connector-j'
+	// 배포 환경(render 프로필)에서 별도 DB 서버 없이 뜨기 위한 인메모리 DB
+	runtimeOnly 'com.h2database:h2'
 	testImplementation 'org.springframework.boot:spring-boot-starter-data-jpa-test'
 	// 로그인 비밀번호 해싱(BCrypt)만 필요 — spring-boot-starter-security 전체를 넣으면 모든 REST
 	// 엔드포인트에 인증 필터가 자동 적용돼 지금 열려있는 게임 API들이 막혀버려서 이 경량 모듈만 쓴다.
