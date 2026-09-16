@@ -6,7 +6,10 @@ Spring Boot(REST + WebSocket) 백엔드와 React 프론트엔드로 만든 실�
 
 **[https://texas-holdem-poker-nine.vercel.app](https://texas-holdem-poker-nine.vercel.app)**
 
-게스트 닉네임만으로 바로 입장해서 플레이해볼 수 있습니다. 무료 서버라 잠깐 사용이 없으면 슬립되는데, 처음 접속 시 서버가 깨어나느라 최대 1분 정도 걸릴 수 있습니다.
+![Render](https://img.shields.io/badge/Render-000000?logo=render&logoColor=white)
+![Vercel](https://img.shields.io/badge/Vercel-000000?logo=vercel&logoColor=white)
+
+게스트 닉네임만으로 바로 입장해서 플레이해볼 수 있습니다. 백엔드는 Render, 프론트엔드는 Vercel에 배포했고 둘 다 GitHub 레포와 연동해 `main`에 push하면 자동으로 재배포됩니다. 무료 서버라 잠깐 사용이 없으면 슬립되는데, 처음 접속 시 서버가 깨어나느라 최대 1분 정도 걸릴 수 있습니다.
 
 ## 기술 스택
 
