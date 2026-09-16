@@ -116,8 +116,17 @@ export function CreateRoomModal({ onClose }: CreateRoomModalProps) {
             type="submit"
             disabled={submitting}
           >
-            방 만들기
+            {submitting ? '방 만드는 중...' : '방 만들기'}
           </button>
+          {/* 무료 서버가 한동안 요청이 없어 잠들어 있었다면 깨어나는 데 최대 1분 정도 걸릴 수 있다 —
+              이 안내가 없으면 응답이 느릴 때 "멈췄나?" 싶어 새로고침하고 다시 시도하게 되는데,
+              그러면 먼저 보낸 요청도 나중에 서버에서 완료되면서 방이 중복으로 여러 개 생긴다. */}
+          {submitting && (
+            <p className="text-center text-xs text-slate-400">
+              서버가 잠들어 있었다면 깨어나는 데 최대 1분 정도 걸릴 수 있어요. 새로고침하지 않고
+              잠시만 기다려주세요.
+            </p>
+          )}
         </form>
       </div>
     </div>
